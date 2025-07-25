@@ -1,0 +1,63 @@
+{
+  "name": "@ezenv/cli",
+  "version": "1.0.0",
+  "description": "EzEnv CLI - Secure environment variable management from your terminal",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "ezenv": "./dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "rimraf dist && tsc",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "lint": "eslint . --ext .ts,.tsx",
+    "lint:fix": "eslint . --ext .ts,.tsx --fix",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm run build"
+  },
+  "dependencies": {
+    "commander": "^12.0.0",
+    "chalk": "^5.3.0",
+    "ora": "^8.0.1",
+    "node-fetch": "^3.3.2",
+    "keytar": "^7.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/jest": "^29.5.11",
+    "@typescript-eslint/eslint-plugin": "^6.18.1",
+    "@typescript-eslint/parser": "^6.18.1",
+    "eslint": "^8.56.0",
+    "eslint-config-prettier": "^9.1.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.1",
+    "tsx": "^4.7.0",
+    "rimraf": "^5.0.5",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "ezenv",
+    "cli",
+    "environment",
+    "variables",
+    "secrets",
+    "devops"
+  ],
+  "author": "EzEnv Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ezenv/ezenv.git",
+    "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/ezenv/ezenv/issues"
+  },
+  "homepage": "https://ezenv.io"
+}
