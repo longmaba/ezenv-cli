@@ -1,16 +1,6 @@
 import fetch from 'node-fetch';
-import { exec } from 'child_process';
-import { platform } from 'os';
 import { CredentialService, StoredTokenData } from './credential.service';
-
-export interface DeviceAuthResponse {
-  device_code: string;
-  user_code: string;
-  verification_uri: string;
-  verification_uri_complete: string;
-  expires_in: number;
-  interval: number;
-}
+import { getSupabaseConfig } from '../config/defaults';
 
 export interface TokenResponse {
   access_token: string;
@@ -20,157 +10,25 @@ export interface TokenResponse {
   user_id?: string;
 }
 
-interface ErrorResponse {
-  error: string;
-  error_description?: string;
-}
-
 export type Environment = 'development' | 'staging' | 'production';
 
 export class AuthService {
   private baseUrl: string;
-  private pollingInterval: number = 5000; // 5 seconds
-  private maxPollingTime: number = 600000; // 10 minutes
   private currentEnvironment: Environment = 'production';
+  private supabaseAnonKey: string;
+  
+  // Constants for retry logic
+  private static readonly MAX_RETRY_ATTEMPTS = 3;
+  private static readonly RETRY_BASE_DELAY_MS = 1000;
 
   constructor(private credentialService: CredentialService) {
-    const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-    if (!supabaseUrl) {
-      throw new Error('SUPABASE_URL environment variable is required. Please set it to your Supabase project URL.');
-    }
-    // Remove trailing slash if present
-    this.baseUrl = supabaseUrl.replace(/\/$/, '');
+    const { url, anonKey } = getSupabaseConfig();
+    this.baseUrl = url;
+    this.supabaseAnonKey = anonKey;
   }
 
-  async initDeviceAuth(): Promise<DeviceAuthResponse> {
-    try {
-      const response = await fetch(`${this.baseUrl}/functions/v1/cli-auth/device`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
 
-      let data: DeviceAuthResponse;
-      try {
-        data = await response.json() as DeviceAuthResponse;
-      } catch (parseError) {
-        throw new Error('Invalid response from server: failed to parse JSON');
-      }
-      return data;
-    } catch (error) {
-      const err = error as Error & { code?: string };
-      if (err.code === 'ENOTFOUND' || err.code === 'ECONNREFUSED') {
-        const networkError = new Error('Network connection failed');
-        (networkError as Error & { code?: string }).code = 'NETWORK_ERROR';
-        throw networkError;
-      }
-      throw error;
-    }
-  }
-
-  async pollForToken(deviceCode: string): Promise<TokenResponse> {
-    const startTime = Date.now();
-
-    while (Date.now() - startTime < this.maxPollingTime) {
-      try {
-        const response = await fetch(`${this.baseUrl}/functions/v1/cli-auth/token`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ device_code: deviceCode }),
-        });
-
-        let data: TokenResponse | ErrorResponse;
-        try {
-          data = await response.json() as TokenResponse | ErrorResponse;
-        } catch (parseError) {
-          throw new Error('Invalid response from server: failed to parse JSON');
-        }
-
-        // Check if it's an error response
-        if ('error' in data) {
-          if (data.error === 'authorization_pending') {
-            // Continue polling
-            await new Promise(resolve => setTimeout(resolve, this.pollingInterval));
-            continue;
-          } else if (data.error === 'expired_token') {
-            const error = new Error('Authentication expired');
-            (error as Error & { code?: string }).code = 'EXPIRED_TOKEN';
-            throw error;
-          } else if (data.error === 'access_denied') {
-            const error = new Error('Access denied');
-            (error as Error & { code?: string }).code = 'ACCESS_DENIED';
-            throw error;
-          } else {
-            throw new Error(data.error_description || data.error);
-          }
-        }
-
-        // Success - we have a token response
-        return data as TokenResponse;
-      } catch (error) {
-        const err = error as Error & { code?: string };
-        if (err.code === 'ENOTFOUND' || err.code === 'ECONNREFUSED') {
-          const networkError = new Error('Network connection failed');
-          (networkError as Error & { code?: string }).code = 'NETWORK_ERROR';
-          throw networkError;
-        }
-        throw error;
-      }
-    }
-
-    // Timeout reached
-    const error = new Error('Authentication timed out');
-    (error as Error & { code?: string }).code = 'EXPIRED_TOKEN';
-    throw error;
-  }
-
-  async openBrowser(url: string): Promise<void> {
-    // Validate URL to prevent command injection
-    try {
-      new URL(url);
-    } catch {
-      throw new Error('Invalid URL provided');
-    }
-
-    return new Promise((resolve, reject) => {
-      const platformName = platform();
-      let command: string;
-      let args: string[];
-
-      switch (platformName) {
-        case 'darwin':
-          command = 'open';
-          args = [url];
-          break;
-        case 'win32':
-          command = 'cmd.exe';
-          args = ['/c', 'start', '', url];
-          break;
-        default:
-          // Linux and others
-          command = 'xdg-open';
-          args = [url];
-      }
-
-      const child = exec(`${command} ${args.map(arg => `"${arg.replace(/"/g, '\\"')}"`).join(' ')}`, (error) => {
-        if (error) {
-          reject(error);
-        } else {
-          resolve();
-        }
-      });
-
-      // Ensure the child process is cleaned up
-      child.on('error', reject);
-    });
-  }
 
   setEnvironment(environment: Environment): void {
     this.currentEnvironment = environment;
@@ -184,7 +42,7 @@ export class AuthService {
     return `ezenv-cli-${this.currentEnvironment}`;
   }
 
-  async storeCredentials(token: string, expiresIn?: number, refreshToken?: string, userId?: string): Promise<void> {
+  async storeCredentials(token: string, expiresIn?: number, refreshToken?: string, userId?: string, userEmail?: string): Promise<void> {
     const expiresAt = expiresIn 
       ? new Date(Date.now() + expiresIn * 1000).toISOString()
       : new Date(Date.now() + 3600 * 1000).toISOString(); // Default 1 hour
@@ -194,7 +52,8 @@ export class AuthService {
       expires_at: expiresAt,
       environment: this.currentEnvironment,
       refresh_token: refreshToken,
-      user_id: userId
+      user_id: userId,
+      user_email: userEmail
     };
 
     await this.credentialService.store(
@@ -259,9 +118,10 @@ export class AuthService {
     }
 
     try {
-      const response = await fetch(`${this.baseUrl}/functions/v1/cli-auth/refresh`, {
+      const response = await fetch(`${this.baseUrl}/auth/v1/token?grant_type=refresh_token`, {
         method: 'POST',
         headers: {
+          'apikey': this.supabaseAnonKey,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ refresh_token: tokenData.refresh_token }),
@@ -290,13 +150,166 @@ export class AuthService {
         data.access_token,
         data.expires_in,
         data.refresh_token || tokenData.refresh_token,
-        data.user_id || tokenData.user_id
+        data.user_id || tokenData.user_id,
+        tokenData.user_email
       );
 
       return data;
     } catch (error) {
       if (process.env.DEBUG) {
         console.error('Token refresh error:', error);
+      }
+      return null;
+    }
+  }
+
+  async isAuthenticated(): Promise<boolean> {
+    try {
+      const token = await this.getStoredToken();
+      if (!token) {
+        return false;
+      }
+
+      // Check if token is expired
+      const tokenData = await this.getStoredTokenData();
+      if (tokenData && tokenData.expires_at) {
+        const expiresAt = new Date(tokenData.expires_at);
+        if (expiresAt < new Date()) {
+          // Try to refresh if we have a refresh token
+          if (tokenData.refresh_token) {
+            const newToken = await this.refreshToken();
+            return !!newToken;
+          }
+          return false;
+        }
+      }
+
+      return true;
+    } catch (error) {
+      if (process.env.DEBUG) {
+        console.error('Authentication check error:', error);
+      }
+      return false;
+    }
+  }
+
+  async authenticateWithPassword(email: string, password: string): Promise<void> {
+    let retryCount = 0;
+    
+    while (retryCount < AuthService.MAX_RETRY_ATTEMPTS) {
+      try {
+        const response = await fetch(`${this.baseUrl}/auth/v1/token?grant_type=password`, {
+          method: 'POST',
+          headers: {
+            'apikey': this.supabaseAnonKey,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email,
+            password,
+            gotrue_meta_security: {}
+          }),
+        });
+
+      if (!response.ok) {
+        const errorData = await response.text();
+        let errorMessage = 'Authentication failed';
+        let errorCode = 'UNKNOWN_ERROR';
+
+        // Parse error response
+        try {
+          const parsedError = JSON.parse(errorData);
+          errorMessage = parsedError.error_description || parsedError.msg || parsedError.error || errorMessage;
+          
+          // Map Supabase error codes to our error codes
+          errorCode = this.mapAuthError(response, errorMessage);
+        } catch {
+          // If error response is not JSON, use default message
+        }
+
+        const error = new Error(errorMessage);
+        (error as Error & { code?: string }).code = errorCode;
+        throw error;
+      }
+
+      interface AuthResponseData {
+        access_token: string;
+        expires_in: number;
+        refresh_token?: string;
+        user?: {
+          id?: string;
+          email?: string;
+        };
+      }
+      const data = await response.json() as AuthResponseData;
+      
+      // Store credentials
+      await this.storeCredentials(
+        data.access_token,
+        data.expires_in,
+        data.refresh_token,
+        data.user?.id,
+        data.user?.email || email
+      );
+      return; // Success, exit the retry loop
+    } catch (error) {
+      const err = error as Error & { code?: string };
+      if (err.code === 'ENOTFOUND' || err.code === 'ECONNREFUSED') {
+        // Network error - retry after delay
+        retryCount++;
+        if (retryCount < AuthService.MAX_RETRY_ATTEMPTS) {
+          // Exponential backoff: 1s, 2s, 4s
+          const delay = Math.pow(2, retryCount - 1) * AuthService.RETRY_BASE_DELAY_MS;
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+        const networkError = new Error('Network connection failed');
+        (networkError as Error & { code?: string }).code = 'NETWORK_ERROR';
+        throw networkError;
+      }
+      throw error;
+    }
+    }
+  }
+
+  async logout(): Promise<void> {
+    await this.deleteStoredToken();
+  }
+
+  private mapAuthError(response: { status: number }, errorMessage: string): string {
+    if (response.status === 400 && errorMessage.toLowerCase().includes('invalid')) {
+      return 'INVALID_CREDENTIALS';
+    } else if (response.status === 429) {
+      return 'RATE_LIMITED';
+    } else if (response.status >= 500) {
+      return 'SERVER_ERROR';
+    }
+    return 'UNKNOWN_ERROR';
+  }
+
+  async getCurrentUser(): Promise<unknown | null> {
+    const tokenData = await this.getStoredTokenData();
+    if (!tokenData?.access_token) {
+      return null;
+    }
+
+    try {
+      const response = await fetch(`${this.baseUrl}/auth/v1/user`, {
+        method: 'GET',
+        headers: {
+          'apikey': this.supabaseAnonKey,
+          'Authorization': `Bearer ${tokenData.access_token}`,
+        },
+      });
+
+      if (!response.ok) {
+        return null;
+      }
+
+      return await response.json();
+    } catch (error) {
+      if (process.env.DEBUG) {
+        console.error('Get current user error:', error);
       }
       return null;
     }

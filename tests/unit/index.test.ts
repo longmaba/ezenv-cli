@@ -24,12 +24,18 @@ describe('CLI Initialization', () => {
   });
 
   it('should display version when --version flag is used', () => {
-    const output = execSync(`tsx ${cliPath} --version`, { encoding: 'utf-8' });
+    const output = execSync(`tsx ${cliPath} --version`, { 
+      encoding: 'utf-8',
+      env: { ...process.env, NODE_ENV: 'test' }
+    });
     expect(output.trim()).toBe('1.0.0');
   });
 
   it('should display version when -v flag is used', () => {
-    const output = execSync(`tsx ${cliPath} -v`, { encoding: 'utf-8' });
+    const output = execSync(`tsx ${cliPath} -v`, { 
+      encoding: 'utf-8',
+      env: { ...process.env, NODE_ENV: 'test' }
+    });
     expect(output.trim()).toBe('1.0.0');
   });
 

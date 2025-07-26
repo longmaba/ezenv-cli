@@ -70,7 +70,7 @@ export class ListCommand {
         if (options.filter) {
           console.log(chalk.yellow('No projects found matching your filter.'));
         } else {
-          console.log(chalk.yellow('No projects found. Create your first project at https://app.ezenv.io'));
+          console.log(chalk.yellow('No projects found. Create your first project at https://ezenv.dev'));
         }
         return;
       }

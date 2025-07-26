@@ -9,6 +9,7 @@ describe('Simple Auth Flow Test', () => {
   beforeEach(() => {
     clearAllMocks();
     process.env.SUPABASE_URL = 'https://test.supabase.co';
+    process.env.SUPABASE_ANON_KEY = 'test-anon-key';
     
     credentialService = new CredentialService();
     authService = new AuthService(credentialService);
@@ -16,76 +17,117 @@ describe('Simple Auth Flow Test', () => {
 
   afterEach(() => {
     delete process.env.SUPABASE_URL;
+    delete process.env.SUPABASE_ANON_KEY;
   });
 
   it('should complete auth flow', async () => {
-    // Mock device auth response
-    setMockResponse('/functions/v1/cli-auth/device', async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        device_code: 'test-device-123',
-        user_code: 'TEST-CODE',
-        verification_uri: 'https://test.supabase.co/cli-auth/verify',
-        verification_uri_complete: 'https://test.supabase.co/cli-auth/verify?user_code=TEST-CODE',
-        expires_in: 600,
-        interval: 1
-      })
-    }));
-
-    // Start device auth
-    const deviceResponse = await authService.initDeviceAuth();
-    expect(deviceResponse.device_code).toBe('test-device-123');
-    expect(deviceResponse.user_code).toBe('TEST-CODE');
-
-    // Mock token response - first pending, then success
-    let callCount = 0;
-    setMockResponse('/functions/v1/cli-auth/token', async () => {
-      callCount++;
-      if (callCount < 2) {
+    // Mock successful password auth response
+    setMockResponse('/auth/v1/token', async (url) => {
+      // Check for grant_type=password in URL
+      if (url.includes('grant_type=password')) {
         return {
           ok: true,
           status: 200,
-          json: async () => ({ error: 'authorization_pending' })
+          json: async () => ({
+            access_token: 'test-token-123',
+            token_type: 'Bearer',
+            expires_in: 3600,
+            refresh_token: 'refresh-123',
+            user: {
+              id: 'user-123',
+              email: 'test@example.com'
+            }
+          })
         };
       }
+      return {
+        ok: false,
+        status: 400,
+        json: async () => ({ error: 'unsupported_grant_type' })
+      };
+    });
+
+    // Authenticate with password
+    await authService.authenticateWithPassword('test@example.com', 'password123');
+    
+    // Verify token was stored
+    const storedToken = await authService.getStoredToken();
+    expect(storedToken).toBe('test-token-123');
+  });
+
+  it('should handle invalid credentials', async () => {
+    setMockResponse('/auth/v1/token', async () => ({
+      ok: false,
+      status: 400,
+      text: async () => JSON.stringify({
+        error: 'invalid_grant',
+        error_description: 'Invalid email or password'
+      })
+    }));
+
+    await expect(authService.authenticateWithPassword('test@example.com', 'wrong'))
+      .rejects.toThrow('Invalid email or password');
+  });
+
+  it('should handle network errors with retry', async () => {
+    let attemptCount = 0;
+    
+    setMockResponse('/auth/v1/token', async () => {
+      attemptCount++;
+      if (attemptCount < 3) {
+        const error = new Error('fetch failed');
+        (error as any).code = 'ENOTFOUND';
+        throw error;
+      }
+      // Success on third attempt
       return {
         ok: true,
         status: 200,
         json: async () => ({
           access_token: 'test-token-123',
-          token_type: 'Bearer',
           expires_in: 3600,
-          refresh_token: 'refresh-123'
+          user: { id: '123', email: 'test@example.com' }
         })
       };
     });
 
-    // Poll for token (should succeed on second attempt)
-    const tokenResponse = await authService.pollForToken(deviceResponse.device_code);
+    // Use fake timers for retry delays
+    jest.useFakeTimers();
     
-    expect(tokenResponse.access_token).toBe('test-token-123');
-    expect(callCount).toBe(2); // Should have polled twice
-  });
-
-  it('should handle network errors', async () => {
-    // Mock network error
-    setMockResponse('/functions/v1/cli-auth/device', async () => {
-      const error = new Error('fetch failed');
-      (error as any).code = 'ENOTFOUND';
-      throw error;
-    });
-
-    await expect(authService.initDeviceAuth()).rejects.toThrow('Network connection failed');
+    const authPromise = authService.authenticateWithPassword('test@example.com', 'password');
+    
+    // Advance timers to trigger retries
+    jest.runAllTimers();
+    
+    await authPromise;
+    
+    expect(attemptCount).toBe(3);
+    
+    jest.useRealTimers();
   });
 
   it('should handle server errors', async () => {
-    setMockResponse('/functions/v1/cli-auth/device', async () => ({
+    setMockResponse('/auth/v1/token', async () => ({
       ok: false,
       status: 500,
-      json: async () => ({ error: 'internal_server_error' })
+      text: async () => JSON.stringify({ error: 'internal_server_error' })
     }));
 
-    await expect(authService.initDeviceAuth()).rejects.toThrow('HTTP error! status: 500');
+    await expect(authService.authenticateWithPassword('test@example.com', 'password'))
+      .rejects.toThrow();
+  });
+
+  it('should handle rate limiting', async () => {
+    setMockResponse('/auth/v1/token', async () => ({
+      ok: false,
+      status: 429,
+      text: async () => JSON.stringify({ error: 'rate_limit_exceeded' })
+    }));
+
+    try {
+      await authService.authenticateWithPassword('test@example.com', 'password');
+    } catch (error: any) {
+      expect(error.code).toBe('RATE_LIMITED');
+    }
   });
 });

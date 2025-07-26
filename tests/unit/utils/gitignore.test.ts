@@ -1,0 +1,169 @@
+import { GitignoreManager } from '../../../src/utils/gitignore';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
+
+jest.mock('fs');
+
+const mockReadFileSync = readFileSync as jest.MockedFunction<typeof readFileSync>;
+const mockWriteFileSync = writeFileSync as jest.MockedFunction<typeof writeFileSync>;
+const mockExistsSync = existsSync as jest.MockedFunction<typeof existsSync>;
+
+describe('GitignoreManager', () => {
+  let manager: GitignoreManager;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    manager = new GitignoreManager();
+  });
+
+  describe('exists', () => {
+    it('should return true if .gitignore exists', () => {
+      mockExistsSync.mockReturnValue(true);
+      expect(manager.exists()).toBe(true);
+    });
+
+    it('should return false if .gitignore does not exist', () => {
+      mockExistsSync.mockReturnValue(false);
+      expect(manager.exists()).toBe(false);
+    });
+  });
+
+  describe('hasEntry', () => {
+    it('should return true if exact pattern exists', () => {
+      mockExistsSync.mockReturnValue(true);
+      mockReadFileSync.mockReturnValue('node_modules\n.env\ndist\n' as any);
+      
+      expect(manager.hasEntry('.env')).toBe(true);
+    });
+
+    it('should return true for .env when *.env pattern exists', () => {
+      mockExistsSync.mockReturnValue(true);
+      mockReadFileSync.mockReturnValue('node_modules\n*.env\ndist\n' as any);
+      
+      expect(manager.hasEntry('.env')).toBe(true);
+    });
+
+    it('should return true for .env when .env* pattern exists', () => {
+      mockExistsSync.mockReturnValue(true);
+      mockReadFileSync.mockReturnValue('node_modules\n.env*\ndist\n' as any);
+      
+      expect(manager.hasEntry('.env')).toBe(true);
+    });
+
+    it('should return true for .env when .env.* pattern exists', () => {
+      mockExistsSync.mockReturnValue(true);
+      mockReadFileSync.mockReturnValue('node_modules\n.env.*\ndist\n' as any);
+      
+      expect(manager.hasEntry('.env')).toBe(true);
+    });
+
+    it('should return false if pattern does not exist', () => {
+      mockExistsSync.mockReturnValue(true);
+      mockReadFileSync.mockReturnValue('node_modules\ndist\n' as any);
+      
+      expect(manager.hasEntry('.env')).toBe(false);
+    });
+
+    it('should return false if .gitignore does not exist', () => {
+      mockExistsSync.mockReturnValue(false);
+      
+      expect(manager.hasEntry('.env')).toBe(false);
+    });
+
+    it('should handle read errors gracefully', () => {
+      mockExistsSync.mockReturnValue(true);
+      mockReadFileSync.mockImplementation(() => {
+        throw new Error('Read error');
+      });
+      
+      expect(manager.hasEntry('.env')).toBe(false);
+    });
+  });
+
+  describe('addEntry', () => {
+    it('should add entry with comment to .gitignore', () => {
+      mockExistsSync.mockReturnValue(true);
+      mockReadFileSync.mockReturnValue('node_modules\ndist' as any);
+      
+      const result = manager.addEntry('.env', 'EzEnv');
+      
+      expect(result).toBe(true);
+      expect(mockWriteFileSync).toHaveBeenCalledWith(
+        expect.any(String),
+        'node_modules\ndist\n# EzEnv\n.env\n',
+        'utf-8'
+      );
+    });
+
+    it('should add entry without comment to .gitignore', () => {
+      mockExistsSync.mockReturnValue(true);
+      mockReadFileSync.mockReturnValue('node_modules\ndist' as any);
+      
+      const result = manager.addEntry('.env');
+      
+      expect(result).toBe(true);
+      expect(mockWriteFileSync).toHaveBeenCalledWith(
+        expect.any(String),
+        'node_modules\ndist\n.env\n',
+        'utf-8'
+      );
+    });
+
+    it('should not add entry if it already exists', () => {
+      mockExistsSync.mockReturnValue(true);
+      mockReadFileSync.mockReturnValue('node_modules\n.env\ndist' as any);
+      
+      const result = manager.addEntry('.env');
+      
+      expect(result).toBe(true);
+      expect(mockWriteFileSync).not.toHaveBeenCalled();
+    });
+
+    it('should return false if .gitignore does not exist', () => {
+      mockExistsSync.mockReturnValue(false);
+      
+      const result = manager.addEntry('.env');
+      
+      expect(result).toBe(false);
+      expect(mockWriteFileSync).not.toHaveBeenCalled();
+    });
+
+    it('should handle write errors gracefully', () => {
+      mockExistsSync.mockReturnValue(true);
+      mockReadFileSync.mockReturnValue('node_modules\ndist' as any);
+      mockWriteFileSync.mockImplementation(() => {
+        throw new Error('Write error');
+      });
+      
+      const result = manager.addEntry('.env');
+      
+      expect(result).toBe(false);
+    });
+  });
+
+  describe('create', () => {
+    beforeEach(() => {
+      // Clear mock implementation so create doesn't throw
+      mockWriteFileSync.mockImplementation(jest.fn());
+    });
+
+    it('should create new .gitignore with patterns and comment', () => {
+      manager.create(['.env', 'node_modules', 'dist'], 'Generated by EzEnv');
+      
+      expect(mockWriteFileSync).toHaveBeenCalledWith(
+        expect.any(String),
+        '# Generated by EzEnv\n.env\nnode_modules\ndist\n',
+        'utf-8'
+      );
+    });
+
+    it('should create new .gitignore with patterns only', () => {
+      manager.create(['.env', 'node_modules']);
+      
+      expect(mockWriteFileSync).toHaveBeenCalledWith(
+        expect.any(String),
+        '.env\nnode_modules\n',
+        'utf-8'
+      );
+    });
+  });
+});

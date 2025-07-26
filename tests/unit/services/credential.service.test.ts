@@ -23,16 +23,23 @@ describe('CredentialService', () => {
     // Mock successful keytar test
     mockKeytar.getPassword.mockResolvedValue(null);
     
-    credentialService = new CredentialService();
+    // Reset singleton instance
+    (CredentialService as any).instance = null;
+    
+    credentialService = CredentialService.getInstance();
   });
 
   afterEach(() => {
     jest.restoreAllMocks();
+    // Reset singleton instance
+    (CredentialService as any).instance = null;
   });
 
   describe('platform detection and fallback', () => {
     it('should use keytar when available', async () => {
-      const service = new CredentialService();
+      // Reset singleton and create new instance
+      (CredentialService as any).instance = null;
+      const service = CredentialService.getInstance();
       
       await service.store('test', 'account', 'password');
       
@@ -44,7 +51,9 @@ describe('CredentialService', () => {
       // Make keytar test fail
       mockKeytar.getPassword.mockRejectedValueOnce(new Error('Keytar not available'));
       
-      const service = new CredentialService();
+      // Reset singleton and create new instance
+      (CredentialService as any).instance = null;
+      const service = CredentialService.getInstance();
       
       await service.store('test', 'account', 'password');
       const retrieved = await service.retrieve('test', 'account');

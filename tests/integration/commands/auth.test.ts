@@ -26,11 +26,12 @@ describe('Auth Command Integration', () => {
     } as any;
     
     mockAuthInstance = {
-      initDeviceAuth: jest.fn(),
-      pollForToken: jest.fn(),
-      openBrowser: jest.fn(),
+      authenticateWithPassword: jest.fn(),
       storeCredentials: jest.fn(),
       getStoredToken: jest.fn(),
+      logout: jest.fn(),
+      getCurrentUser: jest.fn(),
+      isAuthenticated: jest.fn(),
     } as any;
     
     // Set up mock implementations

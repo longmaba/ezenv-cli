@@ -1,5 +1,5 @@
 import { setMockResponse } from '../__mocks__/node-fetch';
-import type { DeviceAuthResponse, TokenResponse } from '../../src/types';
+import type { TokenResponse } from '../../src/types';
 
 export interface MockServerOptions {
   baseUrl?: string;
@@ -7,7 +7,6 @@ export interface MockServerOptions {
 
 export class MockSupabaseServer {
   private baseUrl: string;
-  private deviceCodes: Map<string, { userCode: string; authorized: boolean; expired: boolean }> = new Map();
   private userTokens: Map<string, TokenResponse> = new Map();
   private networkErrors: Set<string> = new Set();
   private serverErrors: Map<string, { status: number; error: string }> = new Map();
@@ -25,106 +24,111 @@ export class MockSupabaseServer {
   }
 
   private setupDefaultHandlers() {
-    // Device auth endpoint
-    setMockResponse('/functions/v1/cli-auth/device', async (url, options) => {
-      // Check for errors first
-      if (this.networkErrors.has('/functions/v1/cli-auth/device')) {
-        throw new Error('Network error');
-      }
-      
-      const errorInfo = this.serverErrors.get('/functions/v1/cli-auth/device');
-      if (errorInfo) {
+    // Email/Password auth endpoint
+    setMockResponse('/auth/v1/token', async (url, options) => {
+      // Parse query params from URL
+      const urlObj = new URL(url, this.baseUrl);
+      const grantType = urlObj.searchParams.get('grant_type');
+
+      if (grantType === 'password') {
+        const body = JSON.parse(options.body);
+        const { email, password } = body;
+
+        // Check for errors first
+        if (this.networkErrors.has('/auth/v1/token')) {
+          throw new Error('Network error');
+        }
+        
+        const errorInfo = this.serverErrors.get('/auth/v1/token');
+        if (errorInfo) {
+          return {
+            ok: false,
+            status: errorInfo.status,
+            json: async () => ({ error: errorInfo.error })
+          };
+        }
+
+        // Simple validation
+        if (!email || !password) {
+          return {
+            ok: false,
+            status: 400,
+            json: async () => ({ 
+              error: 'invalid_request',
+              error_description: 'Email and password are required' 
+            })
+          };
+        }
+
+        // Mock authentication logic
+        if (email === 'test@example.com' && password === 'test123') {
+          const token: TokenResponse = {
+            access_token: `test_access_token_${Date.now()}`,
+            refresh_token: `test_refresh_token_${Date.now()}`,
+            token_type: 'Bearer',
+            expires_in: 3600,
+            user_id: '123e4567-e89b-12d3-a456-426614174000'
+          };
+
+          this.userTokens.set(token.access_token, token);
+          
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              ...token,
+              user: {
+                id: '123e4567-e89b-12d3-a456-426614174000',
+                email: email,
+                created_at: new Date().toISOString()
+              }
+            })
+          };
+        } else {
+          return {
+            ok: false,
+            status: 400,
+            json: async () => ({ 
+              error: 'invalid_grant',
+              error_description: 'Invalid email or password' 
+            })
+          };
+        }
+      } else if (grantType === 'refresh_token') {
+        const body = JSON.parse(options.body);
+        const refreshToken = body.refresh_token;
+
+        if (!refreshToken) {
+          return {
+            ok: false,
+            status: 400,
+            json: async () => ({ error: 'invalid_request' })
+          };
+        }
+
+        // Generate new tokens
+        const token: TokenResponse = {
+          access_token: `refreshed_access_token_${Date.now()}`,
+          refresh_token: `refreshed_refresh_token_${Date.now()}`,
+          token_type: 'Bearer',
+          expires_in: 3600
+        };
+
+        this.userTokens.set(token.access_token, token);
         return {
-          ok: false,
-          status: errorInfo.status,
-          json: async () => ({ error: errorInfo.error })
+          ok: true,
+          status: 200,
+          json: async () => token
         };
       }
 
-      const deviceCode = `device_${Date.now()}`;
-      const userCode = `${Math.random().toString(36).substring(2, 6).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
-      
-      this.deviceCodes.set(deviceCode, { userCode, authorized: false, expired: false });
-      
       return {
-        ok: true,
-        status: 200,
-        json: async () => ({
-          device_code: deviceCode,
-          user_code: userCode,
-          verification_uri: `${this.baseUrl}/cli-auth/verify`,
-          verification_uri_complete: `${this.baseUrl}/cli-auth/verify?user_code=${userCode}`,
-          expires_in: 600,
-          interval: 1
-        })
+        ok: false,
+        status: 400,
+        json: async () => ({ error: 'unsupported_grant_type' })
       };
     });
 
-    // Token exchange endpoint
-    setMockResponse('/functions/v1/cli-auth/token', async (url, options) => {
-      // Check for errors first
-      if (this.networkErrors.has('/functions/v1/cli-auth/token')) {
-        throw new Error('Network error');
-      }
-      
-      const errorInfo = this.serverErrors.get('/functions/v1/cli-auth/token');
-      if (errorInfo) {
-        return {
-          ok: false,
-          status: errorInfo.status,
-          json: async () => ({ error: errorInfo.error })
-        };
-      }
-
-      const body = JSON.parse(options.body);
-      const deviceCode = body.device_code;
-      
-      const device = this.deviceCodes.get(deviceCode || '');
-      if (!device) {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ 
-            error: 'invalid_grant', 
-            error_description: 'Invalid device code' 
-          })
-        };
-      }
-
-      if (device.expired) {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ 
-            error: 'expired_token', 
-            error_description: 'Device code has expired' 
-          })
-        };
-      }
-
-      if (!device.authorized) {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ error: 'authorization_pending' })
-        };
-      }
-
-      const token: TokenResponse = {
-        access_token: `test_access_token_${Date.now()}`,
-        refresh_token: `test_refresh_token_${Date.now()}`,
-        token_type: 'Bearer',
-        expires_in: 3600,
-        project_ref: 'test_project'
-      };
-
-      this.userTokens.set(token.access_token, token);
-      return {
-        ok: true,
-        status: 200,
-        json: async () => token
-      };
-    });
 
     // User endpoint for status check
     setMockResponse('/auth/v1/user', async (url, options) => {
@@ -157,91 +161,49 @@ export class MockSupabaseServer {
       };
     });
 
-    // Refresh token endpoint
-    setMockResponse('/functions/v1/cli-auth/refresh', async (url, options) => {
-      const body = JSON.parse(options.body);
-      const refreshToken = body.refresh_token;
-
-      if (!refreshToken) {
-        return {
-          ok: false,
-          status: 400,
-          json: async () => ({ error: 'invalid_request' })
-        };
-      }
-
-      // Generate new tokens
-      const token: TokenResponse = {
-        access_token: `refreshed_access_token_${Date.now()}`,
-        refresh_token: `refreshed_refresh_token_${Date.now()}`,
-        token_type: 'Bearer',
-        expires_in: 3600
-      };
-
-      this.userTokens.set(token.access_token, token);
-      return {
-        ok: true,
-        status: 200,
-        json: async () => token
-      };
-    });
   }
 
-  mockDeviceAuth(response: Partial<DeviceAuthResponse>): void {
-    setMockResponse('/functions/v1/cli-auth/device', async () => ({
-      ok: true,
-      status: 200,
-      json: async () => response
-    }));
-  }
-
-  mockTokenExchange(deviceCode: string, response: TokenResponse | { error: string }): void {
-    setMockResponse('/functions/v1/cli-auth/token', async (url, options) => {
+  mockPasswordAuth(email: string, password: string, success: boolean = true): void {
+    setMockResponse('/auth/v1/token?grant_type=password', async (url, options) => {
       const body = JSON.parse(options.body);
       
-      if (body.device_code === deviceCode) {
-        if ('error' in response) {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => response
-          };
-        }
+      if (body.email === email && body.password === password && success) {
+        const token: TokenResponse = {
+          access_token: `test_access_token_${Date.now()}`,
+          refresh_token: `test_refresh_token_${Date.now()}`,
+          token_type: 'Bearer',
+          expires_in: 3600,
+          user_id: '123e4567-e89b-12d3-a456-426614174000'
+        };
+
+        this.userTokens.set(token.access_token, token);
+        
         return {
           ok: true,
           status: 200,
-          json: async () => response
+          json: async () => ({
+            ...token,
+            user: {
+              id: '123e4567-e89b-12d3-a456-426614174000',
+              email: email,
+              created_at: new Date().toISOString()
+            }
+          })
         };
       }
       
       return {
-        ok: true,
-        status: 200,
-        json: async () => ({ error: 'invalid_grant' })
+        ok: false,
+        status: 400,
+        json: async () => ({ 
+          error: 'invalid_grant',
+          error_description: 'Invalid email or password' 
+        })
       };
     });
   }
 
-  async simulateUserAuthorization(userCode: string): Promise<void> {
-    // Find device by user code
-    for (const [deviceCode, device] of this.deviceCodes.entries()) {
-      if (device.userCode === userCode) {
-        device.authorized = true;
-        return;
-      }
-    }
-    throw new Error(`User code ${userCode} not found`);
-  }
-
-  simulateDeviceExpiry(deviceCode: string): void {
-    const device = this.deviceCodes.get(deviceCode);
-    if (device) {
-      device.expired = true;
-    }
-  }
-
   reset(): void {
-    this.deviceCodes.clear();
     this.userTokens.clear();
     this.networkErrors.clear();
     this.serverErrors.clear();

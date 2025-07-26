@@ -1,6 +1,7 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import type { AuthConfig, Environment } from '../types';
+import type { Environment as EnvironmentObject } from './environment.service';
 
 export interface CLIConfiguration {
   selected_project?: string;
@@ -108,6 +109,17 @@ export class ConfigService {
 
   getSelectedEnvironment(): string | undefined {
     return this.config.cliConfig?.selected_environment;
+  }
+
+  async selectEnvironment(environment: EnvironmentObject): Promise<void> {
+    if (!this.config.cliConfig) {
+      this.config.cliConfig = {
+        output_format: 'env',
+        auto_update_check: true
+      };
+    }
+    this.config.cliConfig.selected_environment = environment.id;
+    await this.saveEzenvrc();
   }
 
   private async save(): Promise<void> {

@@ -161,7 +161,7 @@ describe('ConfigService', () => {
 
       const authConfig = {
         supabaseUrl: 'https://test.supabase.co',
-        loginUrl: 'https://app.ezenv.io/login',
+        loginUrl: 'https://app.ezenv.dev/login',
         clientId: 'test-client-id'
       };
 

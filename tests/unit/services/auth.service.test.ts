@@ -1,20 +1,10 @@
 import { AuthService } from '../../../src/services/auth.service';
 import { CredentialService } from '../../../src/services/credential.service';
 import fetch from 'node-fetch';
-import { exec } from 'child_process';
 
 // Mock node-fetch
 jest.mock('node-fetch');
 const mockFetch = fetch as jest.MockedFunction<typeof fetch>;
-
-// Mock child_process
-jest.mock('child_process');
-const mockExec = exec as jest.MockedFunction<typeof exec>;
-
-// Mock os.platform
-jest.mock('os', () => ({
-  platform: jest.fn(() => 'darwin'),
-}));
 
 describe('AuthService', () => {
   let authService: AuthService;
@@ -31,8 +21,9 @@ describe('AuthService', () => {
       delete: jest.fn(),
     } as any;
     
-    // Set up environment variable for tests
+    // Set up environment variables for tests
     process.env.SUPABASE_URL = 'https://test-project.supabase.co';
+    process.env.SUPABASE_ANON_KEY = 'test-anon-key';
     
     authService = new AuthService(mockCredentialService);
   });
@@ -40,44 +31,63 @@ describe('AuthService', () => {
   afterEach(() => {
     jest.useRealTimers();
     delete process.env.SUPABASE_URL;
+    delete process.env.SUPABASE_ANON_KEY;
   });
 
   describe('constructor', () => {
-    it('should throw error when SUPABASE_URL is not set', () => {
+    it('should use default hosted service when environment variables are not set', () => {
       delete process.env.SUPABASE_URL;
+      delete process.env.SUPABASE_ANON_KEY;
+      delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+      delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
       
       expect(() => new AuthService(mockCredentialService))
-        .toThrow('SUPABASE_URL environment variable is required');
+        .not.toThrow();
+      
+      const authService = new AuthService(mockCredentialService);
+      expect(authService).toBeDefined();
     });
 
-    it('should accept NEXT_PUBLIC_SUPABASE_URL as fallback', () => {
+    it('should use environment variables when set', () => {
+      process.env.SUPABASE_URL = 'https://custom.supabase.co';
+      process.env.SUPABASE_ANON_KEY = 'custom-key';
+      
+      expect(() => new AuthService(mockCredentialService))
+        .not.toThrow();
+    });
+
+    it('should accept NEXT_PUBLIC environment variables as fallback', () => {
       delete process.env.SUPABASE_URL;
+      delete process.env.SUPABASE_ANON_KEY;
       process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://fallback.supabase.co';
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'fallback-key';
       
       const service = new AuthService(mockCredentialService);
       expect(service).toBeDefined();
       
       delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+      delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     });
 
     it('should remove trailing slash from URL', () => {
       process.env.SUPABASE_URL = 'https://test-project.supabase.co/';
       
       const service = new AuthService(mockCredentialService);
-      // We can't directly test the private baseUrl, but we can verify it works in requests
       expect(service).toBeDefined();
     });
   });
 
-  describe('initDeviceAuth', () => {
-    it('should successfully initiate device auth flow', async () => {
+  describe('authenticateWithPassword', () => {
+    it('should successfully authenticate with valid credentials', async () => {
       const mockResponse = {
-        device_code: 'test-device-code',
-        user_code: 'ABC-123',
-        verification_uri: 'https://example.com/auth',
-        verification_uri_complete: 'https://example.com/auth?code=ABC-123',
-        expires_in: 600,
-        interval: 5,
+        access_token: 'test-access-token',
+        refresh_token: 'test-refresh-token',
+        token_type: 'Bearer',
+        expires_in: 3600,
+        user: {
+          id: 'user-123',
+          email: 'test@example.com',
+        },
       };
 
       mockFetch.mockResolvedValueOnce({
@@ -85,216 +95,344 @@ describe('AuthService', () => {
         json: async () => mockResponse,
       } as any);
 
-      const result = await authService.initDeviceAuth();
+      await authService.authenticateWithPassword('test@example.com', 'password123');
       
-      expect(result).toEqual(mockResponse);
       expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining('/functions/v1/cli-auth/device'),
+        expect.stringContaining('/auth/v1/token?grant_type=password'),
         expect.objectContaining({
           method: 'POST',
           headers: {
+            'apikey': 'test-anon-key',
             'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email: 'test@example.com',
+            password: 'password123',
+            gotrue_meta_security: {},
+          }),
+        })
+      );
+
+      expect(mockCredentialService.store).toHaveBeenCalledWith(
+        'ezenv-cli-production',
+        'token_data',
+        expect.stringContaining('test-access-token')
+      );
+    });
+
+    it('should throw INVALID_CREDENTIALS error for wrong password', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        text: async () => JSON.stringify({ 
+          error: 'invalid_grant',
+          error_description: 'Invalid email or password' 
+        }),
+      } as any);
+
+      try {
+        await authService.authenticateWithPassword('test@example.com', 'wrong');
+        fail('Should have thrown an error');
+      } catch (error: any) {
+        expect(error.message).toBe('Invalid email or password');
+        expect(error.code).toBe('INVALID_CREDENTIALS');
+      }
+    });
+
+    it('should throw RATE_LIMITED error on 429 status', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        text: async () => JSON.stringify({ 
+          error: 'rate_limit_exceeded' 
+        }),
+      } as any);
+
+      try {
+        await authService.authenticateWithPassword('test@example.com', 'password');
+      } catch (error: any) {
+        expect(error.code).toBe('RATE_LIMITED');
+      }
+    });
+
+    it('should throw SERVER_ERROR on 500+ status', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        text: async () => JSON.stringify({ error: 'internal_error' }),
+      } as any);
+
+      try {
+        await authService.authenticateWithPassword('test@example.com', 'password');
+      } catch (error: any) {
+        expect(error.code).toBe('SERVER_ERROR');
+      }
+    });
+
+    it('should retry on network errors with exponential backoff', async () => {
+      jest.useFakeTimers();
+      const networkError = new Error('Network error');
+      (networkError as any).code = 'ENOTFOUND';
+
+      // First two attempts fail, third succeeds
+      mockFetch
+        .mockRejectedValueOnce(networkError)
+        .mockRejectedValueOnce(networkError)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            access_token: 'test-token',
+            expires_in: 3600,
+            user: { id: '123', email: 'test@example.com' },
+          }),
+        } as any);
+
+      const authPromise = authService.authenticateWithPassword('test@example.com', 'password');
+      
+      // Advance through retry delays
+      await jest.advanceTimersByTimeAsync(1000); // First retry after 1s
+      await jest.advanceTimersByTimeAsync(2000); // Second retry after 2s
+      
+      await authPromise;
+
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+      jest.useRealTimers();
+    });
+
+    it('should throw NETWORK_ERROR after max retries', async () => {
+      jest.useFakeTimers();
+      const networkError = new Error('Network error');
+      (networkError as any).code = 'ECONNREFUSED';
+
+      mockFetch.mockRejectedValue(networkError);
+
+      const authPromise = authService.authenticateWithPassword('test@example.com', 'password');
+      
+      // Advance through all retry delays
+      await jest.advanceTimersByTimeAsync(1000); // First retry after 1s
+      await jest.advanceTimersByTimeAsync(2000); // Second retry after 2s
+      await jest.advanceTimersByTimeAsync(4000); // Third retry after 4s
+      
+      try {
+        await authPromise;
+        fail('Should have thrown an error');
+      } catch (error: any) {
+        expect(error.code).toBe('NETWORK_ERROR');
+        expect(error.message).toBe('Network connection failed');
+        expect(mockFetch).toHaveBeenCalledTimes(3); // Max retries
+      }
+      
+      jest.useRealTimers();
+    });
+  });
+
+  describe('refreshToken', () => {
+    it('should successfully refresh token', async () => {
+      const storedData = {
+        access_token: 'old-token',
+        refresh_token: 'refresh-token',
+        expires_at: new Date().toISOString(),
+        environment: 'production',
+      };
+
+      mockCredentialService.retrieve.mockResolvedValueOnce(JSON.stringify(storedData));
+
+      const newTokenResponse = {
+        access_token: 'new-access-token',
+        refresh_token: 'new-refresh-token',
+        expires_in: 3600,
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => newTokenResponse,
+      } as any);
+
+      const result = await authService.refreshToken();
+
+      expect(result).toEqual(newTokenResponse);
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('/auth/v1/token?grant_type=refresh_token'),
+        expect.objectContaining({
+          method: 'POST',
+          headers: {
+            'apikey': 'test-anon-key',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ refresh_token: 'refresh-token' }),
+        })
+      );
+    });
+
+    it('should return null when no refresh token is stored', async () => {
+      mockCredentialService.retrieve.mockResolvedValueOnce(null);
+
+      const result = await authService.refreshToken();
+      expect(result).toBeNull();
+    });
+
+    it('should return null on refresh failure', async () => {
+      const storedData = {
+        access_token: 'old-token',
+        refresh_token: 'refresh-token',
+        expires_at: new Date().toISOString(),
+        environment: 'production',
+      };
+
+      mockCredentialService.retrieve.mockResolvedValueOnce(JSON.stringify(storedData));
+
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+      } as any);
+
+      const result = await authService.refreshToken();
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('logout', () => {
+    it('should delete stored token', async () => {
+      mockCredentialService.delete.mockResolvedValueOnce(true);
+
+      await authService.logout();
+
+      expect(mockCredentialService.delete).toHaveBeenCalledWith(
+        'ezenv-cli-production',
+        'token_data'
+      );
+    });
+  });
+
+  describe('getCurrentUser', () => {
+    it('should fetch current user data', async () => {
+      const storedData = {
+        access_token: 'test-token',
+        expires_at: new Date(Date.now() + 3600000).toISOString(),
+        environment: 'production',
+      };
+
+      mockCredentialService.retrieve.mockResolvedValueOnce(JSON.stringify(storedData));
+
+      const userData = {
+        id: 'user-123',
+        email: 'test@example.com',
+        created_at: new Date().toISOString(),
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => userData,
+      } as any);
+
+      const result = await authService.getCurrentUser();
+
+      expect(result).toEqual(userData);
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('/auth/v1/user'),
+        expect.objectContaining({
+          method: 'GET',
+          headers: {
+            'apikey': 'test-anon-key',
+            'Authorization': 'Bearer test-token',
           },
         })
       );
     });
 
-    it('should throw network error on connection failure', async () => {
-      const error = new Error('Network failed');
-      (error as any).code = 'ENOTFOUND';
-      mockFetch.mockRejectedValueOnce(error);
+    it('should return null when no token is stored', async () => {
+      mockCredentialService.retrieve.mockResolvedValueOnce(null);
 
-      await expect(authService.initDeviceAuth()).rejects.toThrow('Network connection failed');
+      const result = await authService.getCurrentUser();
+      expect(result).toBeNull();
     });
 
-    it('should throw error on invalid JSON response', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => { throw new Error('Invalid JSON'); },
-      } as any);
+    it('should return null on API error', async () => {
+      const storedData = {
+        access_token: 'test-token',
+        expires_at: new Date(Date.now() + 3600000).toISOString(),
+        environment: 'production',
+      };
 
-      await expect(authService.initDeviceAuth()).rejects.toThrow('Invalid response from server: failed to parse JSON');
-    });
+      mockCredentialService.retrieve.mockResolvedValueOnce(JSON.stringify(storedData));
 
-    it('should throw HTTP error on non-ok response', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: false,
-        status: 404,
+        status: 401,
       } as any);
 
-      await expect(authService.initDeviceAuth()).rejects.toThrow('HTTP error! status: 404');
+      const result = await authService.getCurrentUser();
+      expect(result).toBeNull();
     });
   });
 
-  describe('pollForToken', () => {
-    it('should successfully poll and return token', async () => {
-      const mockTokenResponse = {
-        access_token: 'test-token',
-        token_type: 'Bearer',
-        expires_in: 3600,
+  describe('isAuthenticated', () => {
+    it('should return true for valid non-expired token', async () => {
+      mockCredentialService.retrieve.mockResolvedValueOnce('test-token');
+      mockCredentialService.getCredentialMetadata = jest.fn().mockResolvedValueOnce({
+        expiresAt: new Date(Date.now() + 3600000).toISOString(), // 1 hour from now
+      });
+      mockCredentialService.getCredential = jest.fn().mockResolvedValueOnce('test-token');
+
+      const result = await authService.isAuthenticated();
+      expect(result).toBe(true);
+    });
+
+    it('should return false when no token is stored', async () => {
+      mockCredentialService.getCredential = jest.fn().mockResolvedValueOnce(null);
+
+      const result = await authService.isAuthenticated();
+      expect(result).toBe(false);
+    });
+
+    it('should attempt refresh when token is expired', async () => {
+      mockCredentialService.getCredential = jest.fn()
+        .mockResolvedValueOnce('test-token')
+        .mockResolvedValueOnce('refresh-token');
+      mockCredentialService.getCredentialMetadata = jest.fn().mockResolvedValueOnce({
+        expiresAt: new Date(Date.now() - 1000).toISOString(), // Expired
+      });
+
+      // Mock successful refresh
+      const storedData = {
+        access_token: 'old-token',
+        refresh_token: 'refresh-token',
+        expires_at: new Date(Date.now() - 1000).toISOString(),
+        environment: 'production',
       };
+      mockCredentialService.retrieve.mockResolvedValueOnce(JSON.stringify(storedData));
 
-      // First call returns pending, second returns token
-      mockFetch
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({ error: 'authorization_pending' }),
-        } as any)
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => mockTokenResponse,
-        } as any);
-
-      const promise = authService.pollForToken('test-device-code');
-      
-      // Advance timers to skip the waiting period
-      await jest.advanceTimersByTimeAsync(5000);
-      
-      const result = await promise;
-      expect(result).toEqual(mockTokenResponse);
-      expect(mockFetch).toHaveBeenCalledTimes(2);
-    });
-
-    it('should throw error on expired token', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ 
-          error: 'expired_token',
-          error_description: 'The device code has expired'
+        json: async () => ({
+          access_token: 'new-token',
+          expires_in: 3600,
         }),
       } as any);
 
-      await expect(authService.pollForToken('test-device-code'))
-        .rejects.toThrow('Authentication expired');
-    });
-
-    it('should throw error on access denied', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ error: 'access_denied' }),
-      } as any);
-
-      await expect(authService.pollForToken('test-device-code'))
-        .rejects.toThrow('Access denied');
-    });
-
-    it('should timeout after max polling time', () => {
-      // This test verifies the timeout logic exists in the code
-      // The actual timeout is tested manually and in integration tests
-      // Testing with real timers would make the test suite too slow
-      
-      // Verify timeout constants are set
-      expect((authService as any).maxPollingTime).toBe(600000); // 10 minutes
-      expect((authService as any).pollingInterval).toBe(5000); // 5 seconds
-    });
-
-    it('should handle JSON parsing errors during polling', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => { throw new Error('Invalid JSON'); },
-      } as any);
-
-      await expect(authService.pollForToken('test-device-code'))
-        .rejects.toThrow('Invalid response from server: failed to parse JSON');
-    });
-
-    it('should handle generic error responses', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ 
-          error: 'invalid_request',
-          error_description: 'Request was malformed'
-        }),
-      } as any);
-
-      await expect(authService.pollForToken('test-device-code'))
-        .rejects.toThrow('Request was malformed');
-    });
-
-    it('should handle error without description', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ error: 'unknown_error' }),
-      } as any);
-
-      await expect(authService.pollForToken('test-device-code'))
-        .rejects.toThrow('unknown_error');
-    });
-
-    it('should handle network errors during polling', async () => {
-      const error = new Error('Network failed');
-      (error as any).code = 'ECONNREFUSED';
-      mockFetch.mockRejectedValueOnce(error);
-
-      await expect(authService.pollForToken('test-device-code'))
-        .rejects.toThrow('Network connection failed');
+      const result = await authService.isAuthenticated();
+      expect(result).toBe(true);
     });
   });
 
-  describe('openBrowser', () => {
-    it('should open browser on macOS', async () => {
-      mockExec.mockImplementationOnce((command, callback: any) => {
-        expect(command).toContain('open "https://example.com"');
-        callback(null);
-      });
+  describe('environment management', () => {
+    it('should set and get environment', () => {
+      authService.setEnvironment('staging');
+      expect(authService.getEnvironment()).toBe('staging');
 
-      await authService.openBrowser('https://example.com');
+      authService.setEnvironment('production');
+      expect(authService.getEnvironment()).toBe('production');
     });
 
-    it('should handle browser open failure', async () => {
-      mockExec.mockImplementationOnce((command, callback: any) => {
-        callback(new Error('Failed to open'));
-      });
-
-      await expect(authService.openBrowser('https://example.com'))
-        .rejects.toThrow('Failed to open');
-    });
-
-    it('should validate URL before opening', async () => {
-      await expect(authService.openBrowser('not-a-valid-url'))
-        .rejects.toThrow('Invalid URL provided');
-    });
-
-    it('should properly escape URLs to prevent command injection', async () => {
-      const maliciousUrl = 'https://example.com/page?param="; rm -rf /; echo "';
+    it('should use environment-specific service names', async () => {
+      authService.setEnvironment('development');
       
-      mockExec.mockImplementationOnce((command, callback: any) => {
-        // Verify the command is properly escaped
-        expect(command).toContain('\\"');
-        callback(null);
-      });
+      await authService.storeCredentials('test-token', 3600);
 
-      await authService.openBrowser(maliciousUrl);
-    });
-  });
-
-  describe('storeCredentials', () => {
-    it('should store credentials using credential service', async () => {
-      await authService.storeCredentials('test-token');
-      
       expect(mockCredentialService.store).toHaveBeenCalledWith(
-        'ezenv-cli-production',
+        'ezenv-cli-development',
         'token_data',
-        expect.stringContaining('"access_token":"test-token"')
-      );
-    });
-  });
-
-  describe('getStoredToken', () => {
-    it('should retrieve token from credential service', async () => {
-      const tokenData = {
-        access_token: 'stored-token',
-        expires_at: new Date(Date.now() + 3600000).toISOString(),
-        environment: 'production'
-      };
-      mockCredentialService.retrieve.mockResolvedValueOnce(JSON.stringify(tokenData));
-      
-      const token = await authService.getStoredToken();
-      
-      expect(token).toBe('stored-token');
-      expect(mockCredentialService.retrieve).toHaveBeenCalledWith(
-        'ezenv-cli-production',
-        'token_data'
+        expect.any(String)
       );
     });
   });

@@ -4,12 +4,17 @@ import { AuthService, Environment } from '../../services/auth.service';
 import { CredentialService } from '../../services/credential.service';
 
 export class LogoutCommand {
-  private authService: AuthService;
-  private credentialService: CredentialService;
+  private authService?: AuthService;
+  private credentialService?: CredentialService;
 
-  constructor() {
-    this.credentialService = new CredentialService();
-    this.authService = new AuthService(this.credentialService);
+  private getAuthService(): AuthService {
+    if (!this.credentialService) {
+      this.credentialService = CredentialService.getInstance();
+    }
+    if (!this.authService) {
+      this.authService = new AuthService(this.credentialService);
+    }
+    return this.authService;
   }
 
   register(program: Command): void {
@@ -37,11 +42,11 @@ export class LogoutCommand {
           console.log(chalk.gray(`Valid environments: ${validEnvs.join(', ')}`));
           process.exit(1);
         }
-
+        
         await this.logoutEnvironment(environment);
       }
     } catch (error) {
-      const err = error as Error;
+      const err = error as Error & { stack?: string };
       console.error(chalk.red('Error during logout:'), err.message);
       if (process.env.DEBUG) {
         console.error(chalk.gray(err.stack || ''));
@@ -51,51 +56,54 @@ export class LogoutCommand {
   }
 
   private async logoutEnvironment(environment: Environment): Promise<void> {
-    this.authService.setEnvironment(environment);
+    const authService = this.getAuthService();
+    authService.setEnvironment(environment);
     
-    const tokenData = await this.authService.getStoredTokenData();
+    const tokenData = await authService.getStoredTokenData();
     
     if (!tokenData) {
       console.log(chalk.yellow(`Not logged in to ${environment} environment`));
       return;
     }
-
-    const deleted = await this.authService.deleteStoredToken();
+    
+    const deleted = await authService.deleteStoredToken();
     
     if (deleted) {
       console.log(chalk.green(`✓ Successfully logged out from ${environment} environment`));
     } else {
-      console.log(chalk.yellow(`⚠️  No credentials found for ${environment} environment`));
+      console.log(chalk.red(`✗ Failed to log out from ${environment} environment`));
     }
   }
 
   private async logoutAllEnvironments(): Promise<void> {
     const environments: Environment[] = ['development', 'staging', 'production'];
-    let loggedOutCount = 0;
+    let loggedOut = false;
 
     console.log(chalk.cyan('Logging out from all environments...\n'));
 
     for (const env of environments) {
-      this.authService.setEnvironment(env);
-      const tokenData = await this.authService.getStoredTokenData();
+      const authService = this.getAuthService();
+      authService.setEnvironment(env);
+      const tokenData = await authService.getStoredTokenData();
       
       if (tokenData) {
-        const deleted = await this.authService.deleteStoredToken();
+        const deleted = await authService.deleteStoredToken();
+        
         if (deleted) {
           console.log(chalk.green(`✓ Logged out from ${env}`));
-          loggedOutCount++;
+          loggedOut = true;
         } else {
-          console.log(chalk.yellow(`⚠️  Failed to log out from ${env}`));
+          console.log(chalk.red(`✗ Failed to log out from ${env}`));
         }
       } else {
-        console.log(chalk.gray(`- ${env}: Not logged in`));
+        console.log(chalk.gray(`- Not logged in to ${env}`));
       }
     }
 
-    if (loggedOutCount > 0) {
-      console.log(chalk.green(`\n✓ Successfully logged out from ${loggedOutCount} environment(s)`));
+    if (!loggedOut) {
+      console.log(chalk.yellow('\nYou were not logged in to any environment'));
     } else {
-      console.log(chalk.yellow('\nNo active sessions found'));
+      console.log(chalk.green('\n✓ Successfully logged out'));
     }
   }
 }

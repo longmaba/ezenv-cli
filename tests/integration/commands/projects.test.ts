@@ -194,7 +194,7 @@ describe('Projects Commands Integration', () => {
       await program.parseAsync(['node', 'test', 'projects', 'list']);
 
       expect(consoleLogSpy).toHaveBeenCalledWith(
-        chalk.yellow('No projects found. Create your first project at https://app.ezenv.io')
+        chalk.yellow('No projects found. Create your first project at https://ezenv.dev')
       );
     });
 

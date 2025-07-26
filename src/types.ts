@@ -1,12 +1,3 @@
-export interface DeviceAuthResponse {
-  device_code: string;
-  user_code: string;
-  verification_uri: string;
-  verification_uri_complete: string;
-  expires_in: number;
-  interval: number;
-}
-
 export interface TokenResponse {
   access_token: string;
   token_type: string;
@@ -27,3 +18,17 @@ export interface LoginOptions {
 }
 
 export type Environment = 'development' | 'staging' | 'production' | 'test';
+
+export interface DiffResult {
+  added: Record<string, string>;
+  modified: Record<string, { old: string; new: string }>;
+  removed: Record<string, string>;
+  localOnly: Record<string, string>;
+  timestamp?: string;
+}
+
+export interface DiffOptions {
+  format: 'inline' | 'side-by-side' | 'summary';
+  colorize: boolean;
+  contextLines?: number;
+}

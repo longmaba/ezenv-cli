@@ -1,4 +1,4 @@
-import keytar from 'keytar';
+import * as keytar from 'keytar';
 import chalk from 'chalk';
 import { getPlatformName } from '../utils/platform';
 import { MemoryCredentialStore, CredentialStore } from './memory-credential-store';
@@ -9,12 +9,21 @@ export interface StoredTokenData {
   environment: 'development' | 'staging' | 'production';
   refresh_token?: string;
   user_id?: string;
+  user_email?: string;
 }
 
 export class CredentialService {
   private backingStore: CredentialStore | null = null;
   private useMemoryFallback = false;
   private static memoryStore = new MemoryCredentialStore();
+  private static instance: CredentialService | null = null;
+
+  static getInstance(): CredentialService {
+    if (!CredentialService.instance) {
+      CredentialService.instance = new CredentialService();
+    }
+    return CredentialService.instance;
+  }
 
   private async getStore(): Promise<CredentialStore> {
     if (this.backingStore) {
@@ -92,5 +101,25 @@ export class CredentialService {
 
   isUsingMemoryStorage(): boolean {
     return this.useMemoryFallback;
+  }
+
+  async getCredential(key: string): Promise<string | null> {
+    return this.retrieve('ezenv', key);
+  }
+
+  async setCredential(key: string, value: string): Promise<void> {
+    await this.store('ezenv', key, value);
+  }
+
+  async deleteCredential(key: string): Promise<boolean> {
+    return this.delete('ezenv', key);
+  }
+
+  async getCredentialMetadata(key: string): Promise<{ expiresAt?: string } | null> {
+    const expiresAt = await this.retrieve('ezenv', `${key}_expires`);
+    if (expiresAt) {
+      return { expiresAt };
+    }
+    return null;
   }
 }

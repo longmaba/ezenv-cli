@@ -3,6 +3,7 @@ import { AuthService } from './auth.service';
 import { CredentialService } from './credential.service';
 import { ConfigService } from './config.service';
 import { APIError, CLIError } from '../utils/errors';
+import { getSupabaseConfig } from '../config/defaults';
 
 export interface Project {
   id: string;
@@ -15,6 +16,21 @@ export interface Project {
   user_role?: 'admin' | 'manager' | 'member';
   created_at: string;
   updated_at: string;
+}
+
+interface RawProjectResponse {
+  id: string;
+  name: string;
+  team_id: string;
+  created_at: string;
+  updated_at: string;
+  team?: {
+    id: string;
+    name: string;
+    team_members?: Array<{
+      role: 'admin' | 'manager' | 'member';
+    }>;
+  };
 }
 
 export interface ProjectListResponse {
@@ -33,26 +49,28 @@ export interface ListOptions {
 export class ProjectService {
   private baseUrl: string;
   private anonKey: string;
-  private authService: AuthService;
+  private authService?: AuthService;
+  private credentialService?: CredentialService;
   private configService: ConfigService;
   private cache: Map<string, { data: ProjectListResponse; timestamp: number }> = new Map();
   private readonly CACHE_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 
   constructor() {
-    const credentialService = new CredentialService();
-    this.authService = new AuthService(credentialService);
     this.configService = new ConfigService();
     
-    const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-    if (!supabaseUrl) {
-      throw new Error('SUPABASE_URL environment variable is required');
+    const { url, anonKey } = getSupabaseConfig();
+    this.baseUrl = url;
+    this.anonKey = anonKey;
+  }
+
+  private getAuthService(): AuthService {
+    if (!this.credentialService) {
+      this.credentialService = CredentialService.getInstance();
     }
-    this.baseUrl = supabaseUrl.replace(/\/$/, '');
-    
-    this.anonKey = process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-    if (!this.anonKey) {
-      console.warn('SUPABASE_ANON_KEY not found. API requests may fail.');
+    if (!this.authService) {
+      this.authService = new AuthService(this.credentialService);
     }
+    return this.authService;
   }
 
   async listProjects(options: ListOptions = {}): Promise<ProjectListResponse> {
@@ -65,22 +83,39 @@ export class ProjectService {
       return cached.data;
     }
 
-    // Get stored token
-    const token = await this.authService.getStoredToken();
+    // Get stored token and user info
+    const authService = this.getAuthService();
+    const token = await authService.getStoredToken();
     if (!token) {
       throw new CLIError('Not authenticated', 'AUTH_REQUIRED');
     }
+    
+    const tokenData = await authService.getStoredTokenData();
+    const userId = tokenData?.user_id;
+    
+    if (!userId) {
+      throw new CLIError('User ID not found in authentication data', 'AUTH_ERROR');
+    }
 
     try {
-      // Build query parameters
+      // Build query parameters for Supabase
+      const offset = (page - 1) * limit;
       const params = new URLSearchParams({
-        page: page.toString(),
+        offset: offset.toString(),
         limit: limit.toString(),
       });
       if (search) {
-        params.append('search', search);
+        // Supabase uses column filters for search
+        params.append('name', `ilike.*${search}*`);
       }
 
+      // Add select to include team information and user's role from team_members
+      // This query gets projects with their teams and the current user's role in each team
+      params.append('select', '*,team:teams!inner(id,name,team_members!inner(role))');
+      
+      // Filter team_members to only show current user's role
+      params.append('team.team_members.user_id', `eq.${userId}`);
+      
       const response = await fetch(`${this.baseUrl}/rest/v1/projects?${params}`, {
         method: 'GET',
         headers: {
@@ -106,7 +141,25 @@ export class ProjectService {
         }
       }
 
-      const projects = await response.json() as Project[];
+      const rawProjects = await response.json() as RawProjectResponse[];
+      
+      // Process projects to extract user role from nested structure
+      const projects: Project[] = rawProjects.map(project => {
+        const userRole = project.team?.team_members?.[0]?.role || 'member';
+        
+        return {
+          id: project.id,
+          name: project.name,
+          team_id: project.team_id,
+          team: project.team ? {
+            id: project.team.id,
+            name: project.team.name
+          } : undefined,
+          user_role: userRole as 'admin' | 'manager' | 'member',
+          created_at: project.created_at,
+          updated_at: project.updated_at
+        };
+      });
       
       // Get total count from response headers
       const rangeHeader = response.headers.get('content-range');
@@ -140,13 +193,21 @@ export class ProjectService {
   }
 
   async getProject(projectId: string): Promise<Project> {
-    const token = await this.authService.getStoredToken();
+    const authService = this.getAuthService();
+    const token = await authService.getStoredToken();
     if (!token) {
       throw new CLIError('Not authenticated', 'AUTH_REQUIRED');
     }
+    
+    const tokenData = await authService.getStoredTokenData();
+    const userId = tokenData?.user_id;
+    
+    if (!userId) {
+      throw new CLIError('User ID not found in authentication data', 'AUTH_ERROR');
+    }
 
     try {
-      const response = await fetch(`${this.baseUrl}/rest/v1/projects?id=eq.${projectId}&select=*,team:teams(*)`, {
+      const response = await fetch(`${this.baseUrl}/rest/v1/projects?id=eq.${projectId}&select=*,team:teams!inner(id,name,team_members!inner(role))&team.team_members.user_id=eq.${userId}`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -169,12 +230,26 @@ export class ProjectService {
         }
       }
 
-      const projects = await response.json() as Project[];
-      if (projects.length === 0) {
+      const rawProjects = await response.json() as RawProjectResponse[];
+      if (rawProjects.length === 0) {
         throw new CLIError('Project not found', 'NOT_FOUND');
       }
-
-      return projects[0];
+      
+      const project = rawProjects[0];
+      const userRole = project.team?.team_members?.[0]?.role || 'member';
+      
+      return {
+        id: project.id,
+        name: project.name,
+        team_id: project.team_id,
+        team: project.team ? {
+          id: project.team.id,
+          name: project.team.name
+        } : undefined,
+        user_role: userRole as 'admin' | 'manager' | 'member',
+        created_at: project.created_at,
+        updated_at: project.updated_at
+      };
     } catch (error) {
       if (error instanceof APIError || error instanceof CLIError) {
         throw error;

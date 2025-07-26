@@ -16,9 +16,7 @@ export interface AuthTestContext {
 }
 
 export class AuthTestHelper extends EventEmitter {
-  private authPromise: Promise<void> | null = null;
   private authService: AuthService;
-  private abortController: AbortController | null = null;
 
   constructor(private context: AuthTestContext) {
     super();
@@ -26,58 +24,21 @@ export class AuthTestHelper extends EventEmitter {
   }
 
   async runAuthFlow(options: Partial<{
-    autoAuthorize: boolean;
-    authorizeAfterMs: number;
-    userCode?: string;
-    openBrowser?: boolean;
-  }> = {}): Promise<{ userCode: string; deviceCode: string }> {
-    const { autoAuthorize = true, authorizeAfterMs = 100, openBrowser = false } = options;
+    email?: string;
+    password?: string;
+    shouldSucceed?: boolean;
+  }> = {}): Promise<void> {
+    const { 
+      email = 'test@example.com', 
+      password = 'test123',
+      shouldSucceed = true 
+    } = options;
     
-    // Mock the browser opening
-    if (!openBrowser) {
-      this.authService.openBrowser = jest.fn().mockResolvedValue(undefined);
-    }
+    // Mock the password auth response
+    this.context.mockServer.mockPasswordAuth(email, password, shouldSucceed);
     
-    // Start device auth
-    const deviceAuthResponse = await this.authService.initDeviceAuth();
-    const { device_code: deviceCode, user_code: userCode } = deviceAuthResponse;
-    
-    // Start polling in background
-    this.authPromise = this.authService.pollForToken(deviceCode).then(async (tokenResponse) => {
-      await this.authService.storeCredentials(
-        tokenResponse.access_token,
-        tokenResponse.expires_in,
-        tokenResponse.refresh_token,
-        tokenResponse.user_id
-      );
-    });
-
-    // Auto-authorize after delay
-    if (autoAuthorize) {
-      setTimeout(async () => {
-        try {
-          await this.context.mockServer.simulateUserAuthorization(userCode);
-        } catch (error) {
-          // Ignore errors during auto-authorization
-        }
-      }, authorizeAfterMs);
-    }
-
-    return { userCode, deviceCode };
-  }
-
-  async waitForPolling(): Promise<void> {
-    if (!this.authPromise) {
-      throw new Error('No auth flow in progress');
-    }
-    return this.authPromise;
-  }
-
-  cancelAuth(): void {
-    if (this.abortController) {
-      this.abortController.abort();
-      this.abortController = null;
-    }
+    // Run authentication
+    await this.authService.authenticateWithPassword(email, password);
   }
 
   // Helper to set up test environment
@@ -98,6 +59,7 @@ export class AuthTestHelper extends EventEmitter {
     
     // Set test environment variables
     process.env.SUPABASE_URL = 'https://test.supabase.co';
+    process.env.SUPABASE_ANON_KEY = 'test-anon-key';
     process.env.HOME = testDir;
 
     const credentialService = new CredentialService();

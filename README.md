@@ -18,8 +18,14 @@ npx @ezenv/cli
 ## Usage
 
 ```bash
-# Authenticate
+# Authenticate with email and password
 ezenv auth login
+
+# Check authentication status
+ezenv auth status
+
+# Logout
+ezenv auth logout
 
 # List projects
 ezenv projects list
@@ -33,6 +39,14 @@ ezenv pull
 # Initialize a new project
 ezenv init
 ```
+
+## Authentication
+
+The CLI uses email/password authentication. When you run `ezenv auth login`, you'll be prompted to enter:
+1. Your email address
+2. Your password (input is masked for security)
+
+The authentication tokens are stored securely in your system's credential store.
 
 ## Development
 
@@ -55,6 +69,21 @@ pnpm lint
 # Type check
 pnpm typecheck
 ```
+
+## Troubleshooting
+
+### Authentication Issues
+
+- **Invalid email or password**: Double-check your credentials. Passwords are case-sensitive.
+- **Network connection failed**: Check your internet connection and firewall settings.
+- **Rate limiting**: If you see "Too many authentication attempts", wait a few minutes before trying again.
+- **Token expired**: The CLI will automatically refresh your token. If issues persist, run `ezenv auth logout` followed by `ezenv auth login`.
+
+### Environment Variables
+
+Make sure you have the following environment variables set:
+- `SUPABASE_URL`: Your Supabase project URL
+- `SUPABASE_ANON_KEY`: Your Supabase anonymous key
 
 ## License
 
