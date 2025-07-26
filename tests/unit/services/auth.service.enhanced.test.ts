@@ -245,6 +245,82 @@ describe('AuthService - Enhanced Features', () => {
       const result = await authService.refreshToken();
       expect(result).toBeNull();
     });
+
+    it('should log refresh failure in debug mode', async () => {
+      process.env.DEBUG = 'true';
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
+
+      const storedToken = {
+        access_token: 'old-token',
+        expires_at: new Date(Date.now() + 300000).toISOString(),
+        environment: 'production',
+        refresh_token: 'refresh-token'
+      };
+      
+      mockCredentialService.retrieve.mockResolvedValueOnce(JSON.stringify(storedToken));
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+      } as any);
+
+      await authService.refreshToken();
+      
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Token refresh failed with status: 401');
+      
+      delete process.env.DEBUG;
+      consoleErrorSpy.mockRestore();
+    });
+
+    it('should handle and log JSON parse errors during refresh', async () => {
+      process.env.DEBUG = 'true';
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
+
+      const storedToken = {
+        access_token: 'old-token',
+        expires_at: new Date(Date.now() + 300000).toISOString(),
+        environment: 'production',
+        refresh_token: 'refresh-token'
+      };
+      
+      mockCredentialService.retrieve.mockResolvedValueOnce(JSON.stringify(storedToken));
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => { throw new Error('Invalid JSON'); }
+      } as any);
+
+      const result = await authService.refreshToken();
+      
+      expect(result).toBeNull();
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to parse refresh token response:', expect.any(Error));
+      
+      delete process.env.DEBUG;
+      consoleErrorSpy.mockRestore();
+    });
+
+    it('should handle and log network errors during refresh', async () => {
+      process.env.DEBUG = 'true';
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
+
+      const storedToken = {
+        access_token: 'old-token',
+        expires_at: new Date(Date.now() + 300000).toISOString(),
+        environment: 'production',
+        refresh_token: 'refresh-token'
+      };
+      
+      mockCredentialService.retrieve.mockResolvedValueOnce(JSON.stringify(storedToken));
+      
+      const error = new Error('Network error');
+      mockFetch.mockRejectedValueOnce(error);
+
+      const result = await authService.refreshToken();
+      
+      expect(result).toBeNull();
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Token refresh error:', error);
+      
+      delete process.env.DEBUG;
+      consoleErrorSpy.mockRestore();
+    });
   });
 
   describe('token deletion', () => {

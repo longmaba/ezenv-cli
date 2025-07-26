@@ -115,6 +115,15 @@ describe('AuthService', () => {
 
       await expect(authService.initDeviceAuth()).rejects.toThrow('Invalid response from server: failed to parse JSON');
     });
+
+    it('should throw HTTP error on non-ok response', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+      } as any);
+
+      await expect(authService.initDeviceAuth()).rejects.toThrow('HTTP error! status: 404');
+    });
   });
 
   describe('pollForToken', () => {
@@ -187,6 +196,38 @@ describe('AuthService', () => {
 
       await expect(authService.pollForToken('test-device-code'))
         .rejects.toThrow('Invalid response from server: failed to parse JSON');
+    });
+
+    it('should handle generic error responses', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ 
+          error: 'invalid_request',
+          error_description: 'Request was malformed'
+        }),
+      } as any);
+
+      await expect(authService.pollForToken('test-device-code'))
+        .rejects.toThrow('Request was malformed');
+    });
+
+    it('should handle error without description', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ error: 'unknown_error' }),
+      } as any);
+
+      await expect(authService.pollForToken('test-device-code'))
+        .rejects.toThrow('unknown_error');
+    });
+
+    it('should handle network errors during polling', async () => {
+      const error = new Error('Network failed');
+      (error as any).code = 'ECONNREFUSED';
+      mockFetch.mockRejectedValueOnce(error);
+
+      await expect(authService.pollForToken('test-device-code'))
+        .rejects.toThrow('Network connection failed');
     });
   });
 
