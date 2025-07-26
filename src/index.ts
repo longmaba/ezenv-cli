@@ -14,6 +14,14 @@ let LoginCommand: AuthCommandType | undefined;
 let StatusCommand: AuthCommandType | undefined;
 let LogoutCommand: AuthCommandType | undefined;
 
+interface ProjectCommandType {
+  new(): {
+    register(program: Command): void;
+  };
+}
+let ProjectListCommand: ProjectCommandType | undefined;
+let ProjectSelectCommand: ProjectCommandType | undefined;
+
 if (process.env.NODE_ENV !== 'test') {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   LoginCommand = require('./commands/auth/login').LoginCommand;
@@ -21,6 +29,10 @@ if (process.env.NODE_ENV !== 'test') {
   StatusCommand = require('./commands/auth/status').StatusCommand;
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   LogoutCommand = require('./commands/auth/logout').LogoutCommand;
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  ProjectListCommand = require('./commands/projects/list').ListCommand;
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  ProjectSelectCommand = require('./commands/projects/select').SelectCommand;
 }
 
 // Read package.json with proper error handling
@@ -61,12 +73,20 @@ if (LogoutCommand) {
   logoutCommand.register(authCommand);
 }
 
-program
+// Projects command group
+const projectsCommand = program
   .command('projects')
-  .description('Manage projects')
-  .action(() => {
-    console.log(chalk.yellow('Project commands coming soon!'));
-  });
+  .description('Manage projects');
+
+// Register projects subcommands
+if (ProjectListCommand) {
+  const listCommand = new ProjectListCommand();
+  listCommand.register(projectsCommand);
+}
+if (ProjectSelectCommand) {
+  const selectCommand = new ProjectSelectCommand();
+  selectCommand.register(projectsCommand);
+}
 
 program
   .command('env')
