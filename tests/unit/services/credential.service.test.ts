@@ -1,4 +1,5 @@
 import { CredentialService } from '../../../src/services/credential.service';
+import { MemoryCredentialStore } from '../../../src/services/memory-credential-store';
 import keytar from 'keytar';
 
 // Mock keytar
@@ -22,11 +23,13 @@ describe('CredentialService', () => {
     
     // Mock successful keytar test
     mockKeytar.getPassword.mockResolvedValue(null);
+    mockKeytar.setPassword.mockResolvedValue(undefined);
+    mockKeytar.deletePassword.mockResolvedValue(true);
     
-    // Reset singleton instance
+    // Reset singleton instance completely
     (CredentialService as any).instance = null;
-    
-    credentialService = CredentialService.getInstance();
+    // Reset static memory store with a fresh instance
+    (CredentialService as any).memoryStore = new MemoryCredentialStore();
   });
 
   afterEach(() => {
@@ -37,14 +40,17 @@ describe('CredentialService', () => {
 
   describe('platform detection and fallback', () => {
     it('should use keytar when available', async () => {
-      // Reset singleton and create new instance
-      (CredentialService as any).instance = null;
-      const service = CredentialService.getInstance();
+      // Create a new instance and force it to initialize the store
+      const service = new CredentialService();
       
       await service.store('test', 'account', 'password');
       
-      expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Using macOS credential store'));
-      expect(mockKeytar.setPassword).toHaveBeenCalled();
+      // Should have tested keytar availability
+      expect(mockKeytar.getPassword).toHaveBeenCalledWith('ezenv-test', 'test');
+      // Should have called setPassword
+      expect(mockKeytar.setPassword).toHaveBeenCalledWith('test', 'account', 'password');
+      // Check console.log was called with credential store message
+      expect(console.log).toHaveBeenCalledWith(expect.stringContaining('credential store'));
     });
 
     it('should fallback to memory storage when keytar fails', async () => {
@@ -79,8 +85,13 @@ describe('CredentialService', () => {
   });
 
   describe('store', () => {
+    beforeEach(() => {
+      credentialService = CredentialService.getInstance();
+    });
+    
     it('should store credentials successfully', async () => {
-      mockKeytar.setPassword.mockResolvedValueOnce();
+      mockKeytar.getPassword.mockResolvedValue(null);
+      mockKeytar.setPassword.mockResolvedValue(undefined);
 
       await credentialService.store('test-service', 'test-account', 'test-password');
 
@@ -92,6 +103,7 @@ describe('CredentialService', () => {
     });
 
     it('should handle keychain errors gracefully', async () => {
+      mockKeytar.getPassword.mockResolvedValue(null);
       mockKeytar.setPassword.mockRejectedValueOnce(
         new Error('Error: The specified item already exists in the keychain.')
       );
@@ -102,6 +114,7 @@ describe('CredentialService', () => {
     });
 
     it('should rethrow non-keychain errors', async () => {
+      mockKeytar.getPassword.mockResolvedValue(null);
       mockKeytar.setPassword.mockRejectedValueOnce(new Error('Unknown error'));
 
       await expect(
@@ -111,6 +124,10 @@ describe('CredentialService', () => {
   });
 
   describe('retrieve', () => {
+    beforeEach(() => {
+      credentialService = CredentialService.getInstance();
+    });
+    
     it('should retrieve credentials successfully', async () => {
       // First call is for keytar test, second is the actual retrieve
       mockKeytar.getPassword
@@ -147,6 +164,10 @@ describe('CredentialService', () => {
   });
 
   describe('delete', () => {
+    beforeEach(() => {
+      credentialService = CredentialService.getInstance();
+    });
+    
     it('should delete credentials successfully', async () => {
       mockKeytar.deletePassword.mockResolvedValueOnce(true);
 

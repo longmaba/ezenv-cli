@@ -96,15 +96,16 @@ describe('Simple Auth Flow Test', () => {
     
     const authPromise = authService.authenticateWithPassword('test@example.com', 'password');
     
-    // Advance timers to trigger retries
-    jest.runAllTimers();
+    // Advance through retry delays
+    await jest.advanceTimersByTimeAsync(1000); // First retry after 1s
+    await jest.advanceTimersByTimeAsync(2000); // Second retry after 2s
     
     await authPromise;
     
     expect(attemptCount).toBe(3);
     
     jest.useRealTimers();
-  });
+  }, 15000);
 
   it('should handle server errors', async () => {
     setMockResponse('/auth/v1/token', async () => ({

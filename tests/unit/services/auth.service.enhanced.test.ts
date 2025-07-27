@@ -200,9 +200,13 @@ describe('AuthService - Enhanced Features', () => {
       
       expect(result).toEqual(newTokenResponse);
       expect(mockFetch).toHaveBeenCalledWith(
-        'https://test-project.supabase.co/functions/v1/cli-auth/refresh',
+        'https://test-project.supabase.co/auth/v1/token?grant_type=refresh_token',
         expect.objectContaining({
           method: 'POST',
+          headers: {
+            'apikey': 'test-anon-key',
+            'Content-Type': 'application/json',
+          },
           body: JSON.stringify({ refresh_token: 'refresh-token' })
         })
       );

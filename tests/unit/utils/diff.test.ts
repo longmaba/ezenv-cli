@@ -11,9 +11,18 @@ jest.mock('chalk', () => ({
 
 describe('DiffService - Format with colors', () => {
   let diffService: DiffService;
+  let originalIsTTY: boolean | undefined;
 
   beforeEach(() => {
     diffService = new DiffService();
+    // Mock process.stdout.isTTY to enable colors
+    originalIsTTY = process.stdout.isTTY;
+    process.stdout.isTTY = true;
+  });
+  
+  afterEach(() => {
+    // Restore original value
+    process.stdout.isTTY = originalIsTTY;
   });
 
   it('should apply colors to inline diff when colorize is true', () => {

@@ -1,27 +1,59 @@
 import { EnvironmentService } from '../../../src/services/environment.service';
 import { ConfigService } from '../../../src/services/config.service';
-import { APIService } from '../../../src/services/api.service';
 import { ProjectService } from '../../../src/services/project.service';
+import { AuthService } from '../../../src/services/auth.service';
+import { CredentialService } from '../../../src/services/credential.service';
 import { APIError, CLIError } from '../../../src/utils/errors';
+import fetch from 'node-fetch';
 
-jest.mock('../../../src/services/api.service');
+jest.mock('node-fetch');
 jest.mock('../../../src/services/project.service');
 jest.mock('../../../src/services/config.service');
+jest.mock('../../../src/services/auth.service');
+jest.mock('../../../src/services/credential.service');
+
+const mockFetch = fetch as jest.MockedFunction<typeof fetch>;
 
 describe('EnvironmentService', () => {
   let environmentService: EnvironmentService;
   let mockConfigService: jest.Mocked<ConfigService>;
-  let mockApiService: jest.Mocked<APIService>;
   let mockProjectService: jest.Mocked<ProjectService>;
+  let mockAuthService: jest.Mocked<AuthService>;
+  let mockCredentialService: jest.Mocked<CredentialService>;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    mockConfigService = new ConfigService() as jest.Mocked<ConfigService>;
-    environmentService = new EnvironmentService(mockConfigService);
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://test.supabase.co';
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'test-anon-key';
     
-    // Access the mocked services
-    mockApiService = (environmentService as any).apiService;
-    mockProjectService = (environmentService as any).projectService;
+    mockConfigService = {
+      selectEnvironment: jest.fn(),
+      getSelectedEnvironment: jest.fn(),
+    } as any;
+    
+    mockProjectService = {
+      getSelectedProject: jest.fn(),
+    } as any;
+    
+    mockAuthService = {
+      getStoredToken: jest.fn().mockResolvedValue('test-token'),
+      setEnvironment: jest.fn(),
+    } as any;
+    
+    mockCredentialService = {} as any;
+    
+    // Mock the constructor dependencies
+    jest.mocked(ProjectService).mockImplementation(() => mockProjectService);
+    jest.mocked(CredentialService).mockImplementation(() => mockCredentialService);
+    jest.mocked(AuthService).mockImplementation(() => mockAuthService);
+    jest.mocked(ConfigService).mockImplementation(() => mockConfigService);
+    
+    environmentService = new EnvironmentService(mockConfigService);
+  });
+  
+  afterEach(() => {
+    delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   });
 
   describe('listEnvironments', () => {
@@ -45,18 +77,32 @@ describe('EnvironmentService', () => {
         }
       ];
 
-      mockApiService.request.mockResolvedValue({ environments: mockEnvironments });
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockEnvironments,
+      } as any);
 
       const result = await environmentService.listEnvironments('proj1');
 
-      expect(mockApiService.request).toHaveBeenCalledWith('GET', '/projects/proj1/environments');
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('https://test.supabase.co/rest/v1/environments?project_id=eq.proj1'),
+        expect.objectContaining({
+          method: 'GET',
+          headers: expect.objectContaining({
+            'Authorization': 'Bearer test-token',
+            'apikey': 'test-anon-key',
+          }),
+        })
+      );
       expect(result).toEqual(mockEnvironments);
     });
 
     it('should throw CLIError when project not found', async () => {
-      mockApiService.request.mockRejectedValue(
-        new APIError(404, 'Project not found', 'NOT_FOUND')
-      );
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        text: async () => 'Access denied',
+      } as any);
 
       await expect(environmentService.listEnvironments('invalid')).rejects.toThrow(CLIError);
     });
@@ -101,7 +147,10 @@ describe('EnvironmentService', () => {
         }
       ];
 
-      mockApiService.request.mockResolvedValue({ environments: mockEnvironments });
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockEnvironments,
+      } as any);
 
       const result = await environmentService.getEnvironment('proj1', 'production');
 
@@ -109,7 +158,10 @@ describe('EnvironmentService', () => {
     });
 
     it('should return null if environment not found', async () => {
-      mockApiService.request.mockResolvedValue({ environments: [] });
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [],
+      } as any);
 
       const result = await environmentService.getEnvironment('proj1', 'nonexistent');
 
@@ -127,7 +179,10 @@ describe('EnvironmentService', () => {
         }
       ];
 
-      mockApiService.request.mockResolvedValue({ environments: mockEnvironments });
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockEnvironments,
+      } as any);
 
       const result = await environmentService.getEnvironment('proj1', 'production');
 
@@ -154,7 +209,10 @@ describe('EnvironmentService', () => {
       };
 
       mockProjectService.getSelectedProject.mockResolvedValue(mockProject);
-      mockApiService.request.mockResolvedValue({ environments: [mockEnvironment] });
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [mockEnvironment],
+      } as any);
       mockConfigService.selectEnvironment.mockResolvedValue(undefined);
 
       await environmentService.selectEnvironment('production');
@@ -180,7 +238,10 @@ describe('EnvironmentService', () => {
       };
 
       mockProjectService.getSelectedProject.mockResolvedValue(mockProject);
-      mockApiService.request.mockResolvedValue({ environments: [] });
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [],
+      } as any);
 
       await expect(environmentService.selectEnvironment('nonexistent')).rejects.toThrow(
         'Environment "nonexistent" not found in project "Test Project"'
@@ -208,7 +269,10 @@ describe('EnvironmentService', () => {
 
       mockConfigService.getSelectedEnvironment.mockReturnValue('env1');
       mockProjectService.getSelectedProject.mockResolvedValue(mockProject);
-      mockApiService.request.mockResolvedValue({ environments: [mockEnvironment] });
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [mockEnvironment],
+      } as any);
 
       const result = await environmentService.getSelectedEnvironment();
 
