@@ -19,6 +19,7 @@ describe('InitService', () => {
         selectedProject: {
           id: 'proj-123',
           name: 'Test Project',
+          team_id: 'team-123',
           team: { id: 'team-123', name: 'Test Team' },
           created_at: '2024-01-01',
           updated_at: '2024-01-01'
@@ -77,6 +78,7 @@ describe('InitService', () => {
         selectedProject: {
           id: 'proj-123',
           name: 'Test Project',
+          team_id: 'team-123',
           team: { id: 'team-123', name: 'Test Team' },
           created_at: '2024-01-01',
           updated_at: '2024-01-01'

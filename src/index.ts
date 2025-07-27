@@ -129,6 +129,12 @@ try {
 
 const program = new Command();
 
+// Parse args early to check for --no-color
+const args = process.argv.slice(2);
+if (args.includes('--no-color')) {
+  chalk.level = 0; // Disable colors
+}
+
 program
   .name('ezenv')
   .description(packageJson.description)
@@ -215,7 +221,8 @@ if (SyncCommand) {
   syncCommand.register(program);
 }
 
-program.addHelpText('after', `
+// Only add colored help text if colors are enabled
+const helpText = chalk.level > 0 ? `
 ${chalk.gray('Examples:')}
   $ ezenv auth login              # Authenticate with EzEnv
   $ ezenv auth status             # Check authentication status
@@ -226,7 +233,20 @@ ${chalk.gray('Examples:')}
   $ ezenv init                    # Initialize project
 
 ${chalk.gray('For more information, visit:')} ${chalk.blue('https://ezenv.dev/docs/cli')}
-`);
+` : `
+Examples:
+  $ ezenv auth login              # Authenticate with EzEnv
+  $ ezenv auth status             # Check authentication status
+  $ ezenv auth logout             # Log out from EzEnv
+  $ ezenv projects list           # List all projects
+  $ ezenv projects select         # Select a project interactively
+  $ ezenv pull                    # Pull secrets to .env file
+  $ ezenv init                    # Initialize project
+
+For more information, visit: https://ezenv.dev/docs/cli
+`;
+
+program.addHelpText('after', helpText);
 
 program.parse(process.argv);
 
