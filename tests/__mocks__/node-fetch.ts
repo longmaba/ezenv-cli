@@ -48,5 +48,26 @@ export const clearAllMocks = () => {
   mockFetch.mockClear();
 };
 
+// Helper to create error response with both json and text methods
+export const createErrorResponse = (status: number, error: any): MockResponse => {
+  const errorData = typeof error === 'string' ? { error } : error;
+  return {
+    ok: false,
+    status,
+    json: async () => errorData,
+    text: async () => JSON.stringify(errorData)
+  };
+};
+
+// Helper to create success response
+export const createSuccessResponse = (data: any): MockResponse => {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => data,
+    text: async () => JSON.stringify(data)
+  };
+};
+
 export default mockFetch;
 export { mockFetch as fetch };

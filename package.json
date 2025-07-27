@@ -10,14 +10,25 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "dev:watch": "tsx watch src/index.ts",
-    "build": "rimraf dist && tsc",
+    "build": "node scripts/build.js",
+    "build:prod": "pnpm run build",
+    "clean": "rimraf dist",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "lint": "eslint . --ext .ts,.tsx",
     "lint:fix": "eslint . --ext .ts,.tsx --fix",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "pnpm run build"
+    "prepare": "pnpm run build",
+    "prepublishOnly": "pnpm run build:prod",
+    "version": "pnpm run changelog && git add CHANGELOG.md",
+    "changelog": "node scripts/changelog.js",
+    "release": "pnpm run build:prod && pnpm publish",
+    "release:beta": "pnpm run build:prod && pnpm publish --tag beta",
+    "release:dry": "pnpm run build:prod && pnpm publish --dry-run",
+    "test:install": "node scripts/test-cross-platform.js",
+    "test:install:unix": "bash scripts/test-install.sh",
+    "test:install:windows": "powershell -ExecutionPolicy Bypass -File scripts/test-install.ps1"
   },
   "dependencies": {
     "@types/inquirer": "^9.0.8",
@@ -48,6 +59,7 @@
   "engines": {
     "node": ">=18.0.0"
   },
+  "bundledDependencies": [],
   "keywords": [
     "ezenv",
     "cli",
@@ -66,5 +78,14 @@
   "bugs": {
     "url": "https://github.com/ezenv/ezenv/issues"
   },
-  "homepage": "https://ezenv.dev"
+  "homepage": "https://ezenv.dev",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "files": [
+    "dist/**/*",
+    "README.md",
+    "LICENSE"
+  ]
 }

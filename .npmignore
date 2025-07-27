@@ -1,0 +1,42 @@
+# Source files
+src/
+
+# Test files
+tests/
+coverage/
+jest.config.js
+*.test.ts
+*.test.js
+test.json
+
+# TypeScript config files
+tsconfig.json
+tsconfig.tsbuildinfo
+
+# Development dependencies
+.env.example
+.env.local
+.env.test
+
+# Build scripts and tools
+scripts/
+STORY_DOD_CHECKLIST.md
+
+# Editor directories
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+.cache/

@@ -136,7 +136,7 @@ export class SecretsService {
         } else if (secretsResponse.status === 403) {
           throw new APIError(403, 'Access denied', 'ACCESS_DENIED');
         } else if (secretsResponse.status === 404) {
-          const error = await secretsResponse.json();
+          const error = await secretsResponse.json() as { error?: string };
           throw new APIError(404, error.error || 'Not found', 'NOT_FOUND');
         } else {
           const errorText = await secretsResponse.text();

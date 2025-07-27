@@ -1,10 +1,13 @@
-// Mock keytar to throw an error so credential service falls back to memory storage
+// Mock keytar - by default falls back to memory storage
+// Individual tests can override this behavior
 const keytarError = new Error('Keytar is not available');
 
-export default {
+const keytar = {
   setPassword: jest.fn().mockRejectedValue(keytarError),
   getPassword: jest.fn().mockRejectedValue(keytarError),
   deletePassword: jest.fn().mockRejectedValue(keytarError),
   findPassword: jest.fn().mockRejectedValue(keytarError),
   findCredentials: jest.fn().mockRejectedValue(keytarError),
 };
+
+export default keytar;

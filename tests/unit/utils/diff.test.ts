@@ -22,7 +22,7 @@ describe('DiffService - Format with colors', () => {
   
   afterEach(() => {
     // Restore original value
-    process.stdout.isTTY = originalIsTTY;
+    process.stdout.isTTY = originalIsTTY as boolean;
   });
 
   it('should apply colors to inline diff when colorize is true', () => {
