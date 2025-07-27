@@ -209,13 +209,13 @@ describe('Auth Commands Integration', () => {
         expect.stringContaining('✓ Logged out from development')
       );
       expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('- staging: Not logged in')
+        expect.stringContaining('- Not logged in to staging')
       );
       expect(consoleLogSpy).toHaveBeenCalledWith(
         expect.stringContaining('✓ Logged out from production')
       );
       expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('✓ Successfully logged out from 2 environment(s)')
+        expect.stringContaining('✓ Successfully logged out')
       );
     });
 

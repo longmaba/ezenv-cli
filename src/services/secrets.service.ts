@@ -113,16 +113,20 @@ export class SecretsService {
         environmentId = environments[0].id;
       }
 
-      // Now fetch secrets for this environment
+      // Call Edge Function to get decrypted secrets
       const secretsResponse = await fetch(
-        `${this.baseUrl}/rest/v1/secrets?environment_id=eq.${environmentId}&select=*`,
+        `${this.baseUrl}/functions/v1/get-secrets`,
         {
-          method: 'GET',
+          method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,
             'apikey': this.anonKey,
             'Content-Type': 'application/json',
-          }
+          },
+          body: JSON.stringify({
+            projectId,
+            environmentId
+          })
         }
       );
 
@@ -131,6 +135,9 @@ export class SecretsService {
           throw new APIError(401, 'Authentication expired', 'AUTH_EXPIRED');
         } else if (secretsResponse.status === 403) {
           throw new APIError(403, 'Access denied', 'ACCESS_DENIED');
+        } else if (secretsResponse.status === 404) {
+          const error = await secretsResponse.json();
+          throw new APIError(404, error.error || 'Not found', 'NOT_FOUND');
         } else {
           const errorText = await secretsResponse.text();
           throw new APIError(
@@ -141,23 +148,8 @@ export class SecretsService {
         }
       }
 
-      const secretsArray = await secretsResponse.json() as Array<{
-        id: string;
-        environment_id: string;
-        key: string;
-        encrypted_value: string;
-        iv: string;
-        created_by: string;
-        created_at: string;
-        updated_at: string;
-      }>;
-      
-      // Convert array to key-value object
-      const secrets: Record<string, string> = {};
-      secretsArray.forEach(secret => {
-        // Use encrypted_value as the value (assuming it's already decrypted by RLS)
-        secrets[secret.key] = secret.encrypted_value;
-      });
+      const response = await secretsResponse.json() as { secrets: Record<string, string> };
+      const secrets = response.secrets || {};
       
       // Never log secret values
       logger.debug('Secrets fetched successfully', { 

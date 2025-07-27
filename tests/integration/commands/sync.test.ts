@@ -1,52 +1,52 @@
 import { SyncCommand } from '../../../src/commands/sync';
-import { ApiService } from '../../../src/services/api.service';
-import { FileService } from '../../../src/services/file.service';
-import { DiffService } from '../../../src/services/diff.service';
-import { ConfigService } from '../../../src/services/config.service';
 import { Command } from 'commander';
 import * as readline from 'readline';
 
+// Mock the environment variable for supabase URL
+process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://test.supabase.co';
+
+jest.mock('../../../src/services/credential.service');
+jest.mock('../../../src/services/config.service');
 jest.mock('../../../src/services/api.service');
 jest.mock('../../../src/services/file.service');
 jest.mock('../../../src/services/diff.service');
-jest.mock('../../../src/services/config.service');
+jest.mock('../../../src/services/secrets.service');
 jest.mock('readline');
 
 describe('SyncCommand', () => {
   let syncCommand: SyncCommand;
-  let mockApiService: jest.Mocked<ApiService>;
-  let mockFileService: jest.Mocked<FileService>;
-  let mockDiffService: jest.Mocked<DiffService>;
-  let mockConfigService: jest.Mocked<ConfigService>;
   let mockConsoleLog: jest.SpyInstance;
   let mockConsoleError: jest.SpyInstance;
   let mockProcessExit: jest.SpyInstance;
 
   beforeEach(() => {
-    mockApiService = {
-      getSecrets: jest.fn()
-    } as any;
-    mockFileService = {
-      getEnvPath: jest.fn(),
-      readEnvFile: jest.fn(),
-      backupFile: jest.fn(),
-      writeEnvFile: jest.fn()
-    } as any;
-    mockDiffService = {
-      compareSecrets: jest.fn(),
-      formatDiff: jest.fn(),
-      applyDiff: jest.fn()
-    } as any;
-    mockConfigService = {
-      load: jest.fn()
-    } as any;
+    // Clear all mocks
+    jest.clearAllMocks();
 
-    syncCommand = new SyncCommand(
-      mockApiService,
-      mockFileService,
-      mockDiffService,
-      mockConfigService
-    );
+    // Mock ConfigService
+    const ConfigService = require('../../../src/services/config.service').ConfigService;
+    ConfigService.prototype.init = jest.fn().mockResolvedValue(undefined);
+    ConfigService.prototype.getSelectedProject = jest.fn().mockReturnValue('project-id');
+    ConfigService.prototype.getSelectedEnvironment = jest.fn().mockReturnValue('development');
+
+    // Mock SecretsService
+    const SecretsService = require('../../../src/services/secrets.service').SecretsService;
+    SecretsService.prototype.getSecrets = jest.fn();
+
+    // Mock FileService
+    const FileService = require('../../../src/services/file.service').FileService;
+    FileService.prototype.getEnvPath = jest.fn().mockResolvedValue('.env');
+    FileService.prototype.readEnvFile = jest.fn();
+    FileService.prototype.backupFile = jest.fn();
+    FileService.prototype.writeEnvFile = jest.fn();
+
+    // Mock DiffService
+    const DiffService = require('../../../src/services/diff.service').DiffService;
+    DiffService.prototype.compareSecrets = jest.fn();
+    DiffService.prototype.formatDiff = jest.fn();
+    DiffService.prototype.applyDiff = jest.fn();
+
+    syncCommand = new SyncCommand();
 
     mockConsoleLog = jest.spyOn(console, 'log').mockImplementation();
     mockConsoleError = jest.spyOn(console, 'error').mockImplementation();
@@ -64,10 +64,8 @@ describe('SyncCommand', () => {
 
   describe('execute', () => {
     it('should show error when no project is selected', async () => {
-      mockConfigService.load.mockResolvedValue({
-        currentProject: null,
-        currentEnvironment: 'development'
-      } as any);
+      const ConfigService = require('../../../src/services/config.service').ConfigService;
+      ConfigService.prototype.getSelectedProject.mockReturnValue(null);
 
       const command = new Command();
       syncCommand.register(command);
@@ -78,10 +76,9 @@ describe('SyncCommand', () => {
     });
 
     it('should show error when no environment is selected', async () => {
-      mockConfigService.load.mockResolvedValue({
-        currentProject: 'project-id',
-        currentEnvironment: null
-      } as any);
+      const ConfigService = require('../../../src/services/config.service').ConfigService;
+      ConfigService.prototype.getSelectedProject.mockReturnValue('project-id');
+      ConfigService.prototype.getSelectedEnvironment.mockReturnValue(null);
 
       const command = new Command();
       syncCommand.register(command);
@@ -92,17 +89,16 @@ describe('SyncCommand', () => {
     });
 
     it('should handle case when environment is already up to date', async () => {
-      mockConfigService.load.mockResolvedValue({
-        currentProject: 'project-id',
-        currentEnvironment: 'development'
-      } as any);
+      const SecretsService = require('../../../src/services/secrets.service').SecretsService;
+      const FileService = require('../../../src/services/file.service').FileService;
+      const DiffService = require('../../../src/services/diff.service').DiffService;
 
       const secrets = { KEY1: 'value1', KEY2: 'value2' };
-      mockApiService.getSecrets.mockResolvedValue(secrets);
-      mockFileService.getEnvPath.mockResolvedValue('.env');
-      mockFileService.readEnvFile.mockResolvedValue(secrets);
+      SecretsService.prototype.getSecrets.mockResolvedValue(secrets);
+      FileService.prototype.getEnvPath.mockResolvedValue('.env');
+      FileService.prototype.readEnvFile.mockResolvedValue(secrets);
       
-      mockDiffService.compareSecrets.mockReturnValue({
+      DiffService.prototype.compareSecrets.mockReturnValue({
         added: {},
         modified: {},
         removed: {},
@@ -115,18 +111,17 @@ describe('SyncCommand', () => {
       await command.parseAsync(['node', 'test', 'sync']);
       
       expect(mockConsoleLog).toHaveBeenCalledWith(expect.stringContaining('already up to date'));
-      expect(mockDiffService.applyDiff).not.toHaveBeenCalled();
+      expect(DiffService.prototype.applyDiff).not.toHaveBeenCalled();
     });
 
     it('should apply changes with auto-approve flag', async () => {
-      mockConfigService.load.mockResolvedValue({
-        currentProject: 'project-id',
-        currentEnvironment: 'development'
-      } as any);
+      const SecretsService = require('../../../src/services/secrets.service').SecretsService;
+      const FileService = require('../../../src/services/file.service').FileService;
+      const DiffService = require('../../../src/services/diff.service').DiffService;
 
-      mockApiService.getSecrets.mockResolvedValue({ KEY1: 'new-value' });
-      mockFileService.getEnvPath.mockResolvedValue('.env');
-      mockFileService.readEnvFile.mockResolvedValue({ KEY1: 'old-value' });
+      SecretsService.prototype.getSecrets.mockResolvedValue({ KEY1: 'new-value' });
+      FileService.prototype.getEnvPath.mockResolvedValue('.env');
+      FileService.prototype.readEnvFile.mockResolvedValue({ KEY1: 'old-value' });
       
       const diffResult = {
         added: {},
@@ -134,27 +129,26 @@ describe('SyncCommand', () => {
         removed: {},
         localOnly: {}
       };
-      mockDiffService.compareSecrets.mockReturnValue(diffResult);
-      mockDiffService.formatDiff.mockReturnValue('~ KEY1\n  - old-value\n  + new-value');
+      DiffService.prototype.compareSecrets.mockReturnValue(diffResult);
+      DiffService.prototype.formatDiff.mockReturnValue('~ KEY1\n  - old-value\n  + new-value');
 
       const command = new Command();
       syncCommand.register(command);
       
       await command.parseAsync(['node', 'test', 'sync', '--auto-approve']);
       
-      expect(mockDiffService.applyDiff).toHaveBeenCalledWith('.env', diffResult, mockFileService);
+      expect(DiffService.prototype.applyDiff).toHaveBeenCalledWith('.env', diffResult, expect.any(Object));
       expect(mockConsoleLog).toHaveBeenCalledWith(expect.stringContaining('synchronized'));
     });
 
     it('should prompt for confirmation without auto-approve', async () => {
-      mockConfigService.load.mockResolvedValue({
-        currentProject: 'project-id',
-        currentEnvironment: 'development'
-      } as any);
+      const SecretsService = require('../../../src/services/secrets.service').SecretsService;
+      const FileService = require('../../../src/services/file.service').FileService;
+      const DiffService = require('../../../src/services/diff.service').DiffService;
 
-      mockApiService.getSecrets.mockResolvedValue({ KEY1: 'new-value' });
-      mockFileService.getEnvPath.mockResolvedValue('.env');
-      mockFileService.readEnvFile.mockResolvedValue({ KEY1: 'old-value' });
+      SecretsService.prototype.getSecrets.mockResolvedValue({ KEY1: 'new-value' });
+      FileService.prototype.getEnvPath.mockResolvedValue('.env');
+      FileService.prototype.readEnvFile.mockResolvedValue({ KEY1: 'old-value' });
       
       const diffResult = {
         added: {},
@@ -162,8 +156,8 @@ describe('SyncCommand', () => {
         removed: {},
         localOnly: {}
       };
-      mockDiffService.compareSecrets.mockReturnValue(diffResult);
-      mockDiffService.formatDiff.mockReturnValue('~ KEY1\n  - old-value\n  + new-value');
+      DiffService.prototype.compareSecrets.mockReturnValue(diffResult);
+      DiffService.prototype.formatDiff.mockReturnValue('~ KEY1\n  - old-value\n  + new-value');
 
       // Mock readline to answer 'yes'
       const mockRl = {
@@ -181,26 +175,25 @@ describe('SyncCommand', () => {
         expect.stringContaining('Apply these changes?'),
         expect.any(Function)
       );
-      expect(mockDiffService.applyDiff).toHaveBeenCalled();
+      expect(DiffService.prototype.applyDiff).toHaveBeenCalled();
     });
 
     it('should cancel sync when user says no', async () => {
-      mockConfigService.load.mockResolvedValue({
-        currentProject: 'project-id',
-        currentEnvironment: 'development'
-      } as any);
+      const SecretsService = require('../../../src/services/secrets.service').SecretsService;
+      const FileService = require('../../../src/services/file.service').FileService;
+      const DiffService = require('../../../src/services/diff.service').DiffService;
 
-      mockApiService.getSecrets.mockResolvedValue({ KEY1: 'new-value' });
-      mockFileService.getEnvPath.mockResolvedValue('.env');
-      mockFileService.readEnvFile.mockResolvedValue({ KEY1: 'old-value' });
+      SecretsService.prototype.getSecrets.mockResolvedValue({ KEY1: 'new-value' });
+      FileService.prototype.getEnvPath.mockResolvedValue('.env');
+      FileService.prototype.readEnvFile.mockResolvedValue({ KEY1: 'old-value' });
       
-      mockDiffService.compareSecrets.mockReturnValue({
+      DiffService.prototype.compareSecrets.mockReturnValue({
         added: {},
         modified: { KEY1: { old: 'old-value', new: 'new-value' } },
         removed: {},
         localOnly: {}
       });
-      mockDiffService.formatDiff.mockReturnValue('~ KEY1');
+      DiffService.prototype.formatDiff.mockReturnValue('~ KEY1');
 
       // Mock readline to answer 'no'
       const mockRl = {
@@ -215,29 +208,28 @@ describe('SyncCommand', () => {
       await command.parseAsync(['node', 'test', 'sync']);
       
       expect(mockConsoleLog).toHaveBeenCalledWith(expect.stringContaining('cancelled'));
-      expect(mockDiffService.applyDiff).not.toHaveBeenCalled();
+      expect(DiffService.prototype.applyDiff).not.toHaveBeenCalled();
     });
 
     it('should show warning for local-only variables', async () => {
-      mockConfigService.load.mockResolvedValue({
-        currentProject: 'project-id',
-        currentEnvironment: 'development'
-      } as any);
+      const SecretsService = require('../../../src/services/secrets.service').SecretsService;
+      const FileService = require('../../../src/services/file.service').FileService;
+      const DiffService = require('../../../src/services/diff.service').DiffService;
 
-      mockApiService.getSecrets.mockResolvedValue({ KEY1: 'value1' });
-      mockFileService.getEnvPath.mockResolvedValue('.env');
-      mockFileService.readEnvFile.mockResolvedValue({ 
+      SecretsService.prototype.getSecrets.mockResolvedValue({ KEY1: 'value1' });
+      FileService.prototype.getEnvPath.mockResolvedValue('.env');
+      FileService.prototype.readEnvFile.mockResolvedValue({ 
         KEY1: 'value1',
         LOCAL_KEY: 'local-value'
       });
       
-      mockDiffService.compareSecrets.mockReturnValue({
+      DiffService.prototype.compareSecrets.mockReturnValue({
         added: {},
         modified: {},
         removed: {},
         localOnly: { LOCAL_KEY: 'local-value' }
       });
-      mockDiffService.formatDiff.mockReturnValue('! LOCAL_KEY=local-value');
+      DiffService.prototype.formatDiff.mockReturnValue('! LOCAL_KEY=local-value');
 
       const command = new Command();
       syncCommand.register(command);
@@ -248,55 +240,53 @@ describe('SyncCommand', () => {
     });
 
     it('should create backup by default', async () => {
-      mockConfigService.load.mockResolvedValue({
-        currentProject: 'project-id',
-        currentEnvironment: 'development'
-      } as any);
+      const SecretsService = require('../../../src/services/secrets.service').SecretsService;
+      const FileService = require('../../../src/services/file.service').FileService;
+      const DiffService = require('../../../src/services/diff.service').DiffService;
 
-      mockApiService.getSecrets.mockResolvedValue({ KEY1: 'new-value' });
-      mockFileService.getEnvPath.mockResolvedValue('.env');
-      mockFileService.readEnvFile.mockResolvedValue({ KEY1: 'old-value' });
+      SecretsService.prototype.getSecrets.mockResolvedValue({ KEY1: 'new-value' });
+      FileService.prototype.getEnvPath.mockResolvedValue('.env');
+      FileService.prototype.readEnvFile.mockResolvedValue({ KEY1: 'old-value' });
       
-      mockDiffService.compareSecrets.mockReturnValue({
+      DiffService.prototype.compareSecrets.mockReturnValue({
         added: { KEY1: 'new-value' },
         modified: {},
         removed: {},
         localOnly: {}
       });
-      mockDiffService.formatDiff.mockReturnValue('+ KEY1=new-value');
+      DiffService.prototype.formatDiff.mockReturnValue('+ KEY1=new-value');
 
       const command = new Command();
       syncCommand.register(command);
       
       await command.parseAsync(['node', 'test', 'sync', '--auto-approve']);
       
-      expect(mockFileService.backupFile).toHaveBeenCalledWith('.env');
+      expect(FileService.prototype.backupFile).toHaveBeenCalledWith('.env');
     });
 
     it('should skip backup with --no-backup flag', async () => {
-      mockConfigService.load.mockResolvedValue({
-        currentProject: 'project-id',
-        currentEnvironment: 'development'
-      } as any);
+      const SecretsService = require('../../../src/services/secrets.service').SecretsService;
+      const FileService = require('../../../src/services/file.service').FileService;
+      const DiffService = require('../../../src/services/diff.service').DiffService;
 
-      mockApiService.getSecrets.mockResolvedValue({ KEY1: 'new-value' });
-      mockFileService.getEnvPath.mockResolvedValue('.env');
-      mockFileService.readEnvFile.mockResolvedValue({});
+      SecretsService.prototype.getSecrets.mockResolvedValue({ KEY1: 'new-value' });
+      FileService.prototype.getEnvPath.mockResolvedValue('.env');
+      FileService.prototype.readEnvFile.mockResolvedValue({});
       
-      mockDiffService.compareSecrets.mockReturnValue({
+      DiffService.prototype.compareSecrets.mockReturnValue({
         added: { KEY1: 'new-value' },
         modified: {},
         removed: {},
         localOnly: {}
       });
-      mockDiffService.formatDiff.mockReturnValue('+ KEY1=new-value');
+      DiffService.prototype.formatDiff.mockReturnValue('+ KEY1=new-value');
 
       const command = new Command();
       syncCommand.register(command);
       
       await command.parseAsync(['node', 'test', 'sync', '--auto-approve', '--no-backup']);
       
-      expect(mockFileService.backupFile).not.toHaveBeenCalled();
+      expect(FileService.prototype.backupFile).not.toHaveBeenCalled();
     });
   });
 });

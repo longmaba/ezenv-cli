@@ -12,8 +12,18 @@ jest.mock('../../../src/services/credential.service');
 jest.mock('../../../src/services/api.service');
 jest.mock('../../../src/services/project.service');
 jest.mock('../../../src/services/environment.service');
+jest.mock('../../../src/services/secrets.service');
+jest.mock('../../../src/services/file.service');
 jest.mock('inquirer');
-jest.mock('ora');
+jest.mock('ora', () => {
+  return jest.fn(() => ({
+    start: jest.fn().mockReturnThis(),
+    stop: jest.fn().mockReturnThis(),
+    succeed: jest.fn().mockReturnThis(),
+    fail: jest.fn().mockReturnThis(),
+    text: ''
+  }));
+});
 
 describe('Pull Command Integration', () => {
   let tempDir: string;
@@ -54,6 +64,8 @@ describe('Pull Command Integration', () => {
       const { ProjectService } = require('../../../src/services/project.service');
       const { EnvironmentService } = require('../../../src/services/environment.service');
       const { APIService } = require('../../../src/services/api.service');
+      const { SecretsService } = require('../../../src/services/secrets.service');
+      const { FileService } = require('../../../src/services/file.service');
       
       // Mock config
       ConfigService.prototype.init = jest.fn().mockResolvedValue(undefined);
@@ -72,14 +84,17 @@ describe('Pull Command Integration', () => {
         { id: 'env-456', name: 'development', type: 'development' }
       ]);
       
-      // Mock API service
-      APIService.prototype.post = jest.fn().mockResolvedValue({
-        secrets: {
-          DATABASE_URL: 'postgresql://localhost:5432/db',
-          API_KEY: 'sk-1234567890',
-          DEBUG: 'true'
-        }
+      // Mock secrets service
+      SecretsService.prototype.getSecrets = jest.fn().mockResolvedValue({
+        DATABASE_URL: 'postgresql://localhost:5432/db',
+        API_KEY: 'sk-1234567890',
+        DEBUG: 'true'
       });
+      
+      // Mock file service
+      FileService.prototype.writeEnvFile = jest.fn().mockResolvedValue(undefined);
+      FileService.prototype.backupFile = jest.fn().mockResolvedValue(undefined);
+      FileService.prototype.getEnvPath = jest.fn().mockReturnValue(path.join(tempDir, '.env'));
     });
 
     it('should pull secrets to default .env file', async () => {

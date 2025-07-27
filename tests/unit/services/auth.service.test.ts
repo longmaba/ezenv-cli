@@ -213,14 +213,11 @@ describe('AuthService', () => {
       await jest.advanceTimersByTimeAsync(2000); // Second retry after 2s
       await jest.advanceTimersByTimeAsync(4000); // Third retry after 4s
       
-      try {
-        await authPromise;
-        fail('Should have thrown an error');
-      } catch (error: any) {
-        expect(error.code).toBe('NETWORK_ERROR');
-        expect(error.message).toBe('Network connection failed');
-        expect(mockFetch).toHaveBeenCalledTimes(3); // Max retries
-      }
+      await expect(authPromise).rejects.toMatchObject({
+        code: 'NETWORK_ERROR',
+        message: 'Network connection failed'
+      });
+      expect(mockFetch).toHaveBeenCalledTimes(3); // Max retries
       
       jest.useRealTimers();
     });

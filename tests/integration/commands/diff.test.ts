@@ -113,7 +113,7 @@ describe('DiffCommand', () => {
       
       await command.parseAsync(['node', 'test', 'diff']);
       
-      expect(mockDiffService.formatDiff).toHaveBeenCalledWith(diffResult, {
+      expect(DiffService.prototype.formatDiff).toHaveBeenCalledWith(diffResult, {
         format: 'inline',
         colorize: true
       });
@@ -122,58 +122,56 @@ describe('DiffCommand', () => {
     });
 
     it('should show diff with side-by-side format', async () => {
-      mockConfigService.load.mockResolvedValue({
-        currentProject: 'project-id',
-        currentEnvironment: 'development'
-      } as any);
-
-      mockApiService.getSecrets.mockResolvedValue({ KEY1: 'value1' });
-      mockFileService.getEnvPath.mockResolvedValue('.env');
-      mockFileService.readEnvFile.mockResolvedValue({ KEY1: 'value1' });
+      const SecretsService = require('../../../src/services/secrets.service').SecretsService;
+      const FileService = require('../../../src/services/file.service').FileService;
+      const DiffService = require('../../../src/services/diff.service').DiffService;
       
-      mockDiffService.compareSecrets.mockReturnValue({
+      SecretsService.prototype.getSecrets.mockResolvedValue({ KEY1: 'value1' });
+      FileService.prototype.getEnvPath.mockResolvedValue('.env');
+      FileService.prototype.readEnvFile.mockResolvedValue({ KEY1: 'value1' });
+      
+      DiffService.prototype.compareSecrets.mockReturnValue({
         added: { NEW: 'new' },
         modified: {},
         removed: {},
         localOnly: {}
       });
-      mockDiffService.formatDiff.mockReturnValue('KEY | LOCAL | REMOTE | STATUS\nNEW | -     | new    | Added');
+      DiffService.prototype.formatDiff.mockReturnValue('KEY | LOCAL | REMOTE | STATUS\nNEW | -     | new    | Added');
 
       const command = new Command();
       diffCommand.register(command);
       
       await command.parseAsync(['node', 'test', 'diff', '--format', 'side-by-side']);
       
-      expect(mockDiffService.formatDiff).toHaveBeenCalledWith(expect.any(Object), {
+      expect(DiffService.prototype.formatDiff).toHaveBeenCalledWith(expect.any(Object), {
         format: 'side-by-side',
         colorize: true
       });
     });
 
     it('should show diff with summary format', async () => {
-      mockConfigService.load.mockResolvedValue({
-        currentProject: 'project-id',
-        currentEnvironment: 'development'
-      } as any);
-
-      mockApiService.getSecrets.mockResolvedValue({ KEY1: 'new' });
-      mockFileService.getEnvPath.mockResolvedValue('.env');
-      mockFileService.readEnvFile.mockResolvedValue({ KEY1: 'old' });
+      const SecretsService = require('../../../src/services/secrets.service').SecretsService;
+      const FileService = require('../../../src/services/file.service').FileService;
+      const DiffService = require('../../../src/services/diff.service').DiffService;
       
-      mockDiffService.compareSecrets.mockReturnValue({
+      SecretsService.prototype.getSecrets.mockResolvedValue({ KEY1: 'new' });
+      FileService.prototype.getEnvPath.mockResolvedValue('.env');
+      FileService.prototype.readEnvFile.mockResolvedValue({ KEY1: 'old' });
+      
+      DiffService.prototype.compareSecrets.mockReturnValue({
         added: {},
         modified: { KEY1: { old: 'old', new: 'new' } },
         removed: {},
         localOnly: {}
       });
-      mockDiffService.formatDiff.mockReturnValue('Modified: 1');
+      DiffService.prototype.formatDiff.mockReturnValue('Modified: 1');
 
       const command = new Command();
       diffCommand.register(command);
       
       await command.parseAsync(['node', 'test', 'diff', '--format', 'summary']);
       
-      expect(mockDiffService.formatDiff).toHaveBeenCalledWith(expect.any(Object), {
+      expect(DiffService.prototype.formatDiff).toHaveBeenCalledWith(expect.any(Object), {
         format: 'summary',
         colorize: true
       });
@@ -181,23 +179,22 @@ describe('DiffCommand', () => {
     });
 
     it('should handle no differences', async () => {
-      mockConfigService.load.mockResolvedValue({
-        currentProject: 'project-id',
-        currentEnvironment: 'development'
-      } as any);
-
-      const secrets = { KEY1: 'value1', KEY2: 'value2' };
-      mockApiService.getSecrets.mockResolvedValue(secrets);
-      mockFileService.getEnvPath.mockResolvedValue('.env');
-      mockFileService.readEnvFile.mockResolvedValue(secrets);
+      const SecretsService = require('../../../src/services/secrets.service').SecretsService;
+      const FileService = require('../../../src/services/file.service').FileService;
+      const DiffService = require('../../../src/services/diff.service').DiffService;
       
-      mockDiffService.compareSecrets.mockReturnValue({
+      const secrets = { KEY1: 'value1', KEY2: 'value2' };
+      SecretsService.prototype.getSecrets.mockResolvedValue(secrets);
+      FileService.prototype.getEnvPath.mockResolvedValue('.env');
+      FileService.prototype.readEnvFile.mockResolvedValue(secrets);
+      
+      DiffService.prototype.compareSecrets.mockReturnValue({
         added: {},
         modified: {},
         removed: {},
         localOnly: {}
       });
-      mockDiffService.formatDiff.mockReturnValue('');
+      DiffService.prototype.formatDiff.mockReturnValue('');
 
       const command = new Command();
       diffCommand.register(command);
@@ -208,14 +205,13 @@ describe('DiffCommand', () => {
     });
 
     it('should disable colors with --no-color flag', async () => {
-      mockConfigService.load.mockResolvedValue({
-        currentProject: 'project-id',
-        currentEnvironment: 'development'
-      } as any);
-
-      mockApiService.getSecrets.mockResolvedValue({ KEY1: 'new' });
-      mockFileService.getEnvPath.mockResolvedValue('.env');
-      mockFileService.readEnvFile.mockResolvedValue({ KEY1: 'old' });
+      const SecretsService = require('../../../src/services/secrets.service').SecretsService;
+      const FileService = require('../../../src/services/file.service').FileService;
+      const DiffService = require('../../../src/services/diff.service').DiffService;
+      
+      SecretsService.prototype.getSecrets.mockResolvedValue({ KEY1: 'new' });
+      FileService.prototype.getEnvPath.mockResolvedValue('.env');
+      FileService.prototype.readEnvFile.mockResolvedValue({ KEY1: 'old' });
       
       const diffResult = {
         added: {},
@@ -224,44 +220,43 @@ describe('DiffCommand', () => {
         localOnly: {}
       };
       
-      mockDiffService.compareSecrets.mockReturnValue(diffResult);
-      mockDiffService.formatDiff.mockReturnValue('~ KEY1');
+      DiffService.prototype.compareSecrets.mockReturnValue(diffResult);
+      DiffService.prototype.formatDiff.mockReturnValue('~ KEY1');
 
       const command = new Command();
       diffCommand.register(command);
       
       await command.parseAsync(['node', 'test', 'diff', '--no-color']);
       
-      expect(mockDiffService.formatDiff).toHaveBeenCalledWith(diffResult, {
+      expect(DiffService.prototype.formatDiff).toHaveBeenCalledWith(diffResult, {
         format: 'inline',
         colorize: false
       });
     });
 
     it('should use specified environment', async () => {
-      mockConfigService.load.mockResolvedValue({
-        currentProject: 'project-id',
-        currentEnvironment: 'development'
-      } as any);
-
-      mockApiService.getSecrets.mockResolvedValue({});
-      mockFileService.getEnvPath.mockResolvedValue('.env');
-      mockFileService.readEnvFile.mockResolvedValue({});
+      const SecretsService = require('../../../src/services/secrets.service').SecretsService;
+      const FileService = require('../../../src/services/file.service').FileService;
+      const DiffService = require('../../../src/services/diff.service').DiffService;
       
-      mockDiffService.compareSecrets.mockReturnValue({
+      SecretsService.prototype.getSecrets.mockResolvedValue({});
+      FileService.prototype.getEnvPath.mockResolvedValue('.env');
+      FileService.prototype.readEnvFile.mockResolvedValue({});
+      
+      DiffService.prototype.compareSecrets.mockReturnValue({
         added: {},
         modified: {},
         removed: {},
         localOnly: {}
       });
-      mockDiffService.formatDiff.mockReturnValue('');
+      DiffService.prototype.formatDiff.mockReturnValue('');
 
       const command = new Command();
       diffCommand.register(command);
       
       await command.parseAsync(['node', 'test', 'diff', '--env', 'production']);
       
-      expect(mockApiService.getSecrets).toHaveBeenCalledWith('project-id', 'production');
+      expect(SecretsService.prototype.getSecrets).toHaveBeenCalledWith('Test Project', 'production');
     });
   });
 });

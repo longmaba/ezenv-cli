@@ -1,21 +1,21 @@
 import { InitCommand } from '../../../src/commands/init';
-import { AuthService } from '../../../src/services/auth.service';
-import { ProjectService } from '../../../src/services/project.service';
-import { EnvironmentService } from '../../../src/services/environment.service';
-import { SecretsService } from '../../../src/services/secrets.service';
-import { FileService } from '../../../src/services/file.service';
-import { ConfigService } from '../../../src/services/config.service';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import inquirer from 'inquirer';
 import chalk from 'chalk';
+import { Command } from 'commander';
+
+// Mock the environment variable for supabase URL
+process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://test.supabase.co';
 
 // Mock all dependencies
+jest.mock('../../../src/services/credential.service');
 jest.mock('../../../src/services/auth.service');
 jest.mock('../../../src/services/project.service');
 jest.mock('../../../src/services/environment.service');
 jest.mock('../../../src/services/secrets.service');
 jest.mock('../../../src/services/file.service');
 jest.mock('../../../src/services/config.service');
+jest.mock('../../../src/services/api.service');
 jest.mock('fs');
 jest.mock('inquirer');
 jest.mock('ora', () => {
@@ -35,14 +35,10 @@ const mockInquirer = inquirer as jest.Mocked<typeof inquirer>;
 
 describe('InitCommand Integration', () => {
   let initCommand: InitCommand;
-  let mockAuthService: jest.Mocked<AuthService>;
-  let mockProjectService: jest.Mocked<ProjectService>;
-  let mockEnvironmentService: jest.Mocked<EnvironmentService>;
-  let mockSecretsService: jest.Mocked<SecretsService>;
-  let mockFileService: jest.Mocked<FileService>;
-  let mockConfigService: jest.Mocked<ConfigService>;
   let consoleLogSpy: jest.SpyInstance;
+  let consoleErrorSpy: jest.SpyInstance;
   let processExitSpy: jest.SpyInstance;
+  let command: Command;
 
   const mockProject = {
     id: 'proj-123',
@@ -70,80 +66,103 @@ describe('InitCommand Integration', () => {
     
     // Setup console spy
     consoleLogSpy = jest.spyOn(console, 'log').mockImplementation();
-    consoleLogSpy = jest.spyOn(console, 'error').mockImplementation();
-    processExitSpy = jest.spyOn(process, 'exit').mockImplementation(() => {
-      throw new Error('Process exit');
-    });
+    consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
+    processExitSpy = jest.spyOn(process, 'exit').mockImplementation();
 
-    // Create command instance
+    // Mock AuthService
+    const AuthService = require('../../../src/services/auth.service').AuthService;
+    AuthService.prototype.isAuthenticated = jest.fn().mockResolvedValue(true);
+    AuthService.prototype.authenticateWithPassword = jest.fn();
+    AuthService.prototype.storeCredentials = jest.fn();
+
+    // Mock ConfigService
+    const ConfigService = require('../../../src/services/config.service').ConfigService;
+    ConfigService.prototype.init = jest.fn().mockResolvedValue(undefined);
+    ConfigService.prototype.getConfig = jest.fn().mockResolvedValue({});
+    ConfigService.prototype.setSelectedProject = jest.fn();
+    ConfigService.prototype.setSelectedEnvironment = jest.fn();
+    ConfigService.prototype.save = jest.fn();
+
+    // Mock ProjectService
+    const ProjectService = require('../../../src/services/project.service').ProjectService;
+    ProjectService.prototype.listProjects = jest.fn().mockResolvedValue({ projects: [mockProject] });
+    ProjectService.prototype.getSelectedProject = jest.fn();
+
+    // Mock EnvironmentService
+    const EnvironmentService = require('../../../src/services/environment.service').EnvironmentService;
+    EnvironmentService.prototype.listEnvironments = jest.fn().mockResolvedValue({ environments: [mockEnvironment] });
+
+    // Mock SecretsService
+    const SecretsService = require('../../../src/services/secrets.service').SecretsService;
+    SecretsService.prototype.getSecrets = jest.fn().mockResolvedValue(mockSecrets);
+
+    // Mock FileService
+    const FileService = require('../../../src/services/file.service').FileService;
+    FileService.prototype.writeEnvFile = jest.fn().mockResolvedValue(undefined);
+    FileService.prototype.backupFile = jest.fn().mockResolvedValue(undefined);
+    FileService.prototype.getEnvPath = jest.fn().mockReturnValue('.env');
+
+    // Create command instance and register it
     initCommand = new InitCommand();
+    command = new Command();
+    command.exitOverride(); // Prevent process.exit in tests
+    initCommand.register(command);
     
-    // Get mocked services
-    mockAuthService = (initCommand as any).authService;
-    mockProjectService = (initCommand as any).projectService;
-    mockEnvironmentService = (initCommand as any).environmentService;
-    mockSecretsService = (initCommand as any).secretsService;
-    mockFileService = (initCommand as any).fileService;
-    mockConfigService = (initCommand as any).configService;
-
     // Setup default mocks
-    mockConfigService.init.mockResolvedValue(undefined);
-    mockAuthService.isAuthenticated.mockResolvedValue(true);
-    mockProjectService.listProjects.mockResolvedValue([mockProject]);
-    mockEnvironmentService.listEnvironments.mockResolvedValue([mockEnvironment]);
-    mockSecretsService.getSecrets.mockResolvedValue(mockSecrets);
-    mockFileService.writeEnvFile.mockResolvedValue(undefined);
-    mockFileService.backupFile.mockResolvedValue(undefined);
     mockExistsSync.mockReturnValue(false);
   });
 
   afterEach(() => {
     consoleLogSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
     processExitSpy.mockRestore();
+    jest.clearAllMocks();
   });
 
   describe('Full Interactive Flow', () => {
     it('should complete full init flow when not authenticated', async () => {
       // User is not authenticated
-      mockAuthService.isAuthenticated.mockResolvedValue(false);
+      const AuthService = require('../../../src/services/auth.service').AuthService;
+      AuthService.prototype.isAuthenticated.mockResolvedValueOnce(false).mockResolvedValue(true);
       
       // Mock auth flow
       mockInquirer.prompt
         .mockResolvedValueOnce({ shouldAuth: true }) // Confirm auth
+        .mockResolvedValueOnce({ email: 'test@example.com' }) // Enter email
+        .mockResolvedValueOnce({ password: 'password123' }) // Enter password
         .mockResolvedValueOnce({ selectedProject: mockProject }) // Select project
         .mockResolvedValueOnce({ selectedEnvironment: mockEnvironment }) // Select environment
         .mockResolvedValueOnce({ confirmEnv: true }); // Confirm environment
       
-      mockAuthService.initDeviceAuth.mockResolvedValue({
-        deviceCode: 'device-123',
-        userCode: 'USER-CODE',
-        verificationUri: 'https://ezenv.dev/device'
-      });
-      
-      mockAuthService.pollForToken.mockResolvedValue({
+      AuthService.prototype.authenticateWithPassword.mockResolvedValue({
         access_token: 'token-123',
-        expires_at: Date.now() + 3600000
+        refresh_token: 'refresh-123',
+        user: {
+          id: 'user-123',
+          email: 'test@example.com'
+        }
       });
       
-      mockAuthService.storeCredentials.mockResolvedValue(undefined);
-      mockAuthService.openBrowser.mockResolvedValue(undefined);
+      AuthService.prototype.storeCredentials.mockResolvedValue(undefined);
 
       // Execute command
-      await initCommand['execute']({});
+      await command.parseAsync(['node', 'test', 'init']);
 
       // Verify auth flow
-      expect(mockAuthService.isAuthenticated).toHaveBeenCalled();
-      expect(mockAuthService.initDeviceAuth).toHaveBeenCalled();
-      expect(mockAuthService.pollForToken).toHaveBeenCalledWith('device-123');
-      expect(mockAuthService.storeCredentials).toHaveBeenCalled();
+      expect(AuthService.prototype.isAuthenticated).toHaveBeenCalled();
+      expect(AuthService.prototype.authenticateWithPassword).toHaveBeenCalledWith('test@example.com', 'password123');
 
       // Verify project/env selection
-      expect(mockProjectService.listProjects).toHaveBeenCalled();
-      expect(mockEnvironmentService.listEnvironments).toHaveBeenCalledWith('proj-123');
+      const ProjectService = require('../../../src/services/project.service').ProjectService;
+      const EnvironmentService = require('../../../src/services/environment.service').EnvironmentService;
+      expect(ProjectService.prototype.listProjects).toHaveBeenCalled();
+      expect(EnvironmentService.prototype.listEnvironments).toHaveBeenCalledWith('proj-123');
 
       // Verify file operations
-      expect(mockSecretsService.getSecrets).toHaveBeenCalledWith('Test Project', 'development');
-      expect(mockFileService.writeEnvFile).toHaveBeenCalled();
+      const SecretsService = require('../../../src/services/secrets.service').SecretsService;
+      const FileService = require('../../../src/services/file.service').FileService;
+      expect(SecretsService.prototype.getSecrets).toHaveBeenCalledWith('proj-123', 'development');
+      expect(FileService.prototype.writeEnvFile).toHaveBeenCalled();
       expect(mockWriteFileSync).toHaveBeenCalledWith(
         expect.stringContaining('.ezenvrc'),
         expect.stringContaining('"id": "proj-123"'),
@@ -162,59 +181,64 @@ describe('InitCommand Integration', () => {
         .mockResolvedValueOnce({ selectedEnvironment: mockEnvironment })
         .mockResolvedValueOnce({ confirmEnv: true });
 
-      await initCommand['execute']({});
+      await command.parseAsync(['node', 'test', 'init']);
 
-      expect(mockAuthService.isAuthenticated).toHaveBeenCalled();
-      expect(mockAuthService.initDeviceAuth).not.toHaveBeenCalled();
+      const AuthService = require('../../../src/services/auth.service').AuthService;
+      expect(AuthService.prototype.isAuthenticated).toHaveBeenCalled();
+      expect(AuthService.prototype.authenticateWithPassword).not.toHaveBeenCalled();
       expect(consoleLogSpy).toHaveBeenCalledWith(
         expect.stringContaining('Already authenticated')
       );
     });
 
     it('should handle existing .env file with user confirmation', async () => {
-      mockExistsSync.mockReturnValue(true);
+      mockExistsSync
+        .mockReturnValueOnce(false) // auth check
+        .mockReturnValue(true); // .env exists
       mockInquirer.prompt
-        .mockResolvedValueOnce({ selectedProject: mockProject })
         .mockResolvedValueOnce({ selectedEnvironment: mockEnvironment })
         .mockResolvedValueOnce({ confirmEnv: true })
         .mockResolvedValueOnce({ shouldOverwrite: true }); // Confirm overwrite
 
-      await initCommand['execute']({});
+      await command.parseAsync(['node', 'test', 'init']);
 
-      expect(mockFileService.backupFile).toHaveBeenCalled();
-      expect(mockFileService.writeEnvFile).toHaveBeenCalled();
+      const FileService = require('../../../src/services/file.service').FileService;
+      expect(FileService.prototype.backupFile).toHaveBeenCalled();
+      expect(FileService.prototype.writeEnvFile).toHaveBeenCalled();
     });
 
     it('should skip .env creation when user declines overwrite', async () => {
-      mockExistsSync.mockReturnValue(true);
+      mockExistsSync
+        .mockReturnValueOnce(false) // auth check
+        .mockReturnValue(true); // .env exists
       mockInquirer.prompt
-        .mockResolvedValueOnce({ selectedProject: mockProject })
         .mockResolvedValueOnce({ selectedEnvironment: mockEnvironment })
         .mockResolvedValueOnce({ confirmEnv: true })
         .mockResolvedValueOnce({ shouldOverwrite: false }); // Decline overwrite
 
-      await initCommand['execute']({});
+      await command.parseAsync(['node', 'test', 'init']);
 
-      expect(mockFileService.backupFile).not.toHaveBeenCalled();
-      expect(mockFileService.writeEnvFile).not.toHaveBeenCalled();
+      const FileService = require('../../../src/services/file.service').FileService;
+      expect(FileService.prototype.backupFile).not.toHaveBeenCalled();
+      expect(FileService.prototype.writeEnvFile).not.toHaveBeenCalled();
       expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Skipping .env file creation')
+        expect.stringContaining('Keeping existing .env file')
       );
     });
 
     it('should update .gitignore when it exists', async () => {
       mockExistsSync
-        .mockReturnValueOnce(false) // .env doesn't exist
+        .mockReturnValueOnce(false) // auth check
+        .mockReturnValueOnce(false) // .env doesn't exist  
         .mockReturnValueOnce(true); // .gitignore exists
         
       mockReadFileSync.mockReturnValue(Buffer.from('node_modules\ndist\n'));
       
       mockInquirer.prompt
-        .mockResolvedValueOnce({ selectedProject: mockProject })
         .mockResolvedValueOnce({ selectedEnvironment: mockEnvironment })
         .mockResolvedValueOnce({ confirmEnv: true });
 
-      await initCommand['execute']({});
+      await command.parseAsync(['node', 'test', 'init']);
 
       expect(mockWriteFileSync).toHaveBeenCalledWith(
         expect.stringContaining('.gitignore'),
@@ -226,46 +250,55 @@ describe('InitCommand Integration', () => {
 
   describe('Non-Interactive Mode', () => {
     it('should complete init in non-interactive mode with all options', async () => {
-      await initCommand['execute']({
-        nonInteractive: true,
-        project: 'proj-123',
-        environment: 'env-123'
+      // Need to mock that the project exists
+      const ProjectService = require('../../../src/services/project.service').ProjectService;
+      ProjectService.prototype.listProjects.mockResolvedValue({ 
+        projects: [{ ...mockProject, id: 'proj-123' }] 
+      });
+      
+      // Need to mock that the environment exists
+      const EnvironmentService = require('../../../src/services/environment.service').EnvironmentService;
+      EnvironmentService.prototype.listEnvironments.mockResolvedValue({ 
+        environments: [{ ...mockEnvironment, id: 'env-123' }] 
       });
 
+      await command.parseAsync(['node', 'test', 'init', '--non-interactive', '--project', 'proj-123', '--environment', 'env-123']);
+
       expect(mockInquirer.prompt).not.toHaveBeenCalled();
-      expect(mockSecretsService.getSecrets).toHaveBeenCalled();
-      expect(mockFileService.writeEnvFile).toHaveBeenCalled();
+      const SecretsService = require('../../../src/services/secrets.service').SecretsService;
+      const FileService = require('../../../src/services/file.service').FileService;
+      expect(SecretsService.prototype.getSecrets).toHaveBeenCalled();
+      expect(FileService.prototype.writeEnvFile).toHaveBeenCalled();
     });
 
     it('should fail in non-interactive mode without project', async () => {
-      await expect(initCommand['execute']({
-        nonInteractive: true,
-        environment: 'env-123'
-      })).rejects.toThrow();
+      await command.parseAsync(['node', 'test', 'init', '--non-interactive', '--environment', 'env-123']);
 
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('--project is required in non-interactive mode')
+      );
       expect(processExitSpy).toHaveBeenCalledWith(1);
     });
 
     it('should fail in non-interactive mode when not authenticated', async () => {
-      mockAuthService.isAuthenticated.mockResolvedValue(false);
+      const AuthService = require('../../../src/services/auth.service').AuthService;
+      AuthService.prototype.isAuthenticated.mockResolvedValue(false);
 
-      await expect(initCommand['execute']({
-        nonInteractive: true,
-        project: 'proj-123',
-        environment: 'env-123'
-      })).rejects.toThrow();
+      await command.parseAsync(['node', 'test', 'init', '--non-interactive', '--project', 'proj-123', '--environment', 'env-123']);
 
-      expect(consoleLogSpy).toHaveBeenCalledWith(
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
         expect.stringContaining('Not authenticated')
       );
+      expect(processExitSpy).toHaveBeenCalledWith(1);
     });
   });
 
   describe('Edge Cases', () => {
     it('should handle no projects available', async () => {
-      mockProjectService.listProjects.mockResolvedValue([]);
+      const ProjectService = require('../../../src/services/project.service').ProjectService;
+      ProjectService.prototype.listProjects.mockResolvedValue({ projects: [] });
 
-      await initCommand['execute']({});
+      await command.parseAsync(['node', 'test', 'init']);
 
       expect(consoleLogSpy).toHaveBeenCalledWith(
         expect.stringContaining('No projects found')
@@ -277,7 +310,7 @@ describe('InitCommand Integration', () => {
         .mockResolvedValueOnce({ selectedEnvironment: mockEnvironment })
         .mockResolvedValueOnce({ confirmEnv: true });
 
-      await initCommand['execute']({});
+      await command.parseAsync(['node', 'test', 'init']);
 
       expect(consoleLogSpy).toHaveBeenCalledWith(
         expect.stringContaining('Using project: Test Project')
@@ -290,10 +323,11 @@ describe('InitCommand Integration', () => {
     });
 
     it('should handle user cancelling auth', async () => {
-      mockAuthService.isAuthenticated.mockResolvedValue(false);
+      const AuthService = require('../../../src/services/auth.service').AuthService;
+      AuthService.prototype.isAuthenticated.mockResolvedValue(false);
       mockInquirer.prompt.mockResolvedValueOnce({ shouldAuth: false });
 
-      await initCommand['execute']({});
+      await command.parseAsync(['node', 'test', 'init']);
 
       expect(consoleLogSpy).toHaveBeenCalledWith(
         expect.stringContaining('Initialization cancelled')
@@ -302,14 +336,13 @@ describe('InitCommand Integration', () => {
 
     it('should handle user cancelling environment selection', async () => {
       mockInquirer.prompt
-        .mockResolvedValueOnce({ selectedProject: mockProject })
         .mockResolvedValueOnce({ selectedEnvironment: mockEnvironment })
         .mockResolvedValueOnce({ confirmEnv: false }); // Cancel environment
 
-      await initCommand['execute']({});
+      await command.parseAsync(['node', 'test', 'init']);
 
       expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('No environment selected')
+        expect.stringContaining('No environment selected. Initialization cancelled.')
       );
     });
   });
