@@ -147,7 +147,7 @@ We follow [Semantic Versioning](https://semver.org/):
 After publishing:
 
 1. **Create GitHub Release**
-   - Go to https://github.com/ezenv/ezenv/releases
+   - Go to https://github.com/longmaba/ezenv-cliezenv/releases
    - Click "Draft a new release"
    - Select the version tag
    - Copy release notes from CHANGELOG.md

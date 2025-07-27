@@ -25,4 +25,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automatic token refresh
 - No secrets logged or displayed in terminal output
 
-[1.0.0]: https://github.com/ezenv/ezenv/releases/tag/v1.0.0
+[1.0.0]: https://github.com/longmaba/ezenv-cliezenv/releases/tag/v1.0.0

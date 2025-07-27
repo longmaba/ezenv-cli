@@ -262,7 +262,7 @@ ezenv pull --help
 
 ```bash
 # Clone the repository
-git clone https://github.com/ezenv/ezenv.git
+git clone https://github.com/longmaba/ezenv-cliezenv.git
 cd ezenv/packages/cli
 
 # Install dependencies
@@ -310,16 +310,16 @@ packages/cli/
 
 ## Contributing
 
-We welcome contributions! Please see our [Contributing Guide](https://github.com/ezenv/ezenv/blob/main/CONTRIBUTING.md) for details.
+We welcome contributions! Please see our [Contributing Guide](https://github.com/longmaba/ezenv-cliezenv/blob/main/CONTRIBUTING.md) for details.
 
 ### Reporting Issues
 
-Found a bug or have a feature request? [Open an issue](https://github.com/ezenv/ezenv/issues/new) on GitHub.
+Found a bug or have a feature request? [Open an issue](https://github.com/longmaba/ezenv-cliezenv/issues/new) on GitHub.
 
 ## Support
 
-- **Documentation**: [https://docs.ezenv.dev](https://docs.ezenv.dev)
-- **Issues**: [GitHub Issues](https://github.com/ezenv/ezenv/issues)
+- **Documentation**: [https://docs.ezenv.dev](https://ezenv.dev/docs)
+- **Issues**: [GitHub Issues](https://github.com/longmaba/ezenv-cli/issues)
 - **Discord**: [Join our community](https://discord.gg/ezenv)
 - **Email**: support@ezenv.dev
 
