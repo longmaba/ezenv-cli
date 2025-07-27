@@ -318,7 +318,7 @@ Found a bug or have a feature request? [Open an issue](https://github.com/longma
 
 ## Support
 
-- **Documentation**: [https://docs.ezenv.dev](https://ezenv.dev/docs)
+- **Documentation**: [https://ezenv.dev/docs](https://ezenv.dev/docs)
 - **Issues**: [GitHub Issues](https://github.com/longmaba/ezenv-cli/issues)
 - **Discord**: [Join our community](https://discord.gg/ezenv)
 - **Email**: support@ezenv.dev
