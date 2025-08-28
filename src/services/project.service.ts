@@ -86,7 +86,6 @@ export class ProjectService {
     // Get stored token (auto-refresh handled centrally) and user info
     const authService = this.getAuthService()
     let token = await authService.getStoredToken()
-    const authService = this.getAuthService()
     if (!token) {
       throw new CLIError('Not authenticated', 'AUTH_REQUIRED')
     }
